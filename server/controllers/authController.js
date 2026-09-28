@@ -14,7 +14,12 @@ const {
   normalizeCode,
 } = require('../utils/formatters');
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const EFFECTIVE_GOOGLE_CLIENT_ID =
+  process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_ID.includes('your_google_')
+    ? process.env.GOOGLE_CLIENT_ID
+    : '187470311176-40peqhlrvqs7e6dqckgfc9o62ub0vqom.apps.googleusercontent.com';
+
+const googleClient = new OAuth2Client(EFFECTIVE_GOOGLE_CLIENT_ID);
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -1044,10 +1049,10 @@ exports.googleAuth = async (req, res, next) => {
     // Verify or decode token if provided
     if (rawToken) {
       try {
-        if (process.env.GOOGLE_CLIENT_ID) {
+        if (EFFECTIVE_GOOGLE_CLIENT_ID) {
           const ticket = await googleClient.verifyIdToken({
             idToken: rawToken,
-            audience: process.env.GOOGLE_CLIENT_ID,
+            audience: EFFECTIVE_GOOGLE_CLIENT_ID,
           });
           const payload = ticket.getPayload();
           if (payload) {

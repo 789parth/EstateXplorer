@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const RAW_GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_ID =
+  RAW_GOOGLE_CLIENT_ID &&
+  !RAW_GOOGLE_CLIENT_ID.includes('your_google_') &&
+  RAW_GOOGLE_CLIENT_ID.includes('.apps.googleusercontent.com')
+    ? RAW_GOOGLE_CLIENT_ID
+    : '187470311176-40peqhlrvqs7e6dqckgfc9o62ub0vqom.apps.googleusercontent.com';
 
 /**
  * Loads Google Identity Services (GIS) script.
