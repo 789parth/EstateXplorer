@@ -699,7 +699,7 @@ const AgentDashboard = () => {
               {/* Welcome Message */}
               <div style={{ marginBottom: '20px' }}>
                 <p style={{ fontSize: '.92rem', color: 'var(--text-muted)' }}>
-                  Welcome back, <strong style={{ color: 'var(--text)' }}>{user?.name}</strong> ({agencyName}) Ã‚Â· Here is your client pipeline and listing performance today.
+                  Welcome back, <strong style={{ color: 'var(--text)' }}>{user?.name}</strong> ({agencyName}) · Here is your client pipeline and listing performance today.
                 </p>
               </div>
 
@@ -924,7 +924,7 @@ const AgentDashboard = () => {
                     onClick={() => handleTabChange('listings')}
                     className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition-colors"
                   >
-                    Manage Full Portfolio Ã¢â€ â€™
+                    Manage Full Portfolio &rarr;
                   </button>
                 </div>
 
@@ -967,14 +967,14 @@ const AgentDashboard = () => {
                                 {property.location?.city || property.location?.address || 'India'}
                               </p>
                               <div className="text-xs font-bold text-blue-700">
-                                {property.priceDisplay || `Ã¢â€šÂ¹ ${(property.price || 0).toLocaleString('en-IN')}`}
+                                {property.priceDisplay || `₹ ${(property.price || 0).toLocaleString('en-IN')}`}
                               </div>
                             </div>
                           </div>
 
                           <div className="px-3 py-2 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-xs">
                             <Link to={`/property/${property._id}`} className="text-blue-600 hover:underline text-[0.72rem] font-semibold">
-                              View Live Ã¢â€ â€™
+                              View Live &rarr;
                             </Link>
                             <div className="flex items-center gap-1.5">
                               <button
@@ -1092,7 +1092,7 @@ const AgentDashboard = () => {
                             </p>
 
                             <div className="font-bold text-blue-700 text-sm mb-2.5">
-                              {property.priceDisplay || `Ã¢â€šÂ¹ ${(property.price || 0).toLocaleString('en-IN')}`}
+                              {property.priceDisplay || `₹ ${(property.price || 0).toLocaleString('en-IN')}`}
                             </div>
 
                             <div className="grid grid-cols-3 gap-1 py-2 px-2 bg-slate-50 rounded-lg text-center text-[0.68rem] text-slate-600 border border-slate-100">
@@ -1101,7 +1101,7 @@ const AgentDashboard = () => {
                                 <span className="text-[0.62rem] text-slate-400">Config</span>
                               </div>
                               <div>
-                                <span className="block font-bold text-slate-800">{property.area ? `${property.area} sqft` : 'Ã¢â‚¬â€'}</span>
+                                <span className="block font-bold text-slate-800">{property.area ? `${property.area} sqft` : '—'}</span>
                                 <span className="text-[0.62rem] text-slate-400">Area</span>
                               </div>
                               <div>

@@ -84,22 +84,23 @@ const Home = () => {
       setBookingSubmitting(true);
       const visitDate = e.target.visitDate?.value;
       const visitTime = e.target.visitTime?.value;
-      if (selectedItem?.id) {
-        await submitInquiry(selectedItem.id, {
+      const propId = selectedItem?.id || selectedItem?._id;
+      if (propId) {
+        await submitInquiry(propId, {
           name: user.name,
           email: user.email,
           phone: user.phone || '',
-          message: `Site visit scheduled for ${selectedItem.name}`,
+          message: `Site visit scheduled for ${selectedItem.name || selectedItem.title || 'property'}`,
           visitRequested: true,
           visitDate,
           visitTime,
-          propertyTitle: selectedItem.name,
-          propertyLocation: selectedItem.location,
-          propertyImage: selectedItem.image,
+          propertyTitle: selectedItem.name || selectedItem.title,
+          propertyLocation: typeof selectedItem.location === 'string' ? selectedItem.location : `${selectedItem.location?.address || ''}, ${selectedItem.location?.city || ''}`,
+          propertyImage: selectedItem.image || selectedItem.images?.[0],
           builderName: selectedItem.builder,
         });
         setBookedPropertyIds((prev) => {
-          const updated = [...prev, String(selectedItem.id)];
+          const updated = [...prev, String(propId)];
           try {
             localStorage.setItem('booked_visits', JSON.stringify(updated));
           } catch {}
