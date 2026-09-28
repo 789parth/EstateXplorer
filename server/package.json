@@ -1,0 +1,36 @@
+{
+  "name": "estatexplorer-server",
+  "version": "1.0.0",
+  "description": "EstateXplorer Backend API",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "seed": "node seeder.js",
+    "test": "node tests/enterpriseEmailSecurity.test.js && node tests/disposableEmailSecurity.test.js && node tests/test_auth_security.js && node tests/multiSourceEmailSecurity.test.js && node tests/inquiryBookingEmailSecurity.test.js && node tests/smsGatewaySecurity.test.js && node tests/strictRoleApproval.test.js && node tests/adminUserManagement.test.js && node tests/builderModule.test.js && node tests/googleAuth.test.js && node tests/mediaStreaming.test.js && node tests/propertyEditSecurity.test.js && node tests/roleSecurity.test.js && node tests/fourProviderEmailSecurity.test.js && node tests/channelPartnerAttribution.test.js && node tests/leadPrivacyAndMasking.test.js && node tests/concurrencyBooking.test.js && node tests/lifecycleStateMachine.test.js && node tests/agentAffiliatedLeadFlow.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "disposable-email-domains": "^1.0.62",
+    "dotenv": "^16.4.5",
+    "express": "^4.22.2",
+    "express-rate-limit": "^8.6.2",
+    "express-validator": "^7.0.1",
+    "google-auth-library": "^11.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.3.1",
+    "multer": "^2.2.0",
+    "nodemailer": "^9.0.5",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
+  }
+}
