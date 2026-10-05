@@ -30,19 +30,6 @@ app.use(compression({
   },
 }));
 
-// Health check endpoint (always available, reports live server and db status)
-app.get('/api/health', (req, res) => {
-  const mongoose = require('mongoose');
-  const dbState = mongoose.connection.readyState;
-  const states = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
-  res.status(200).json({
-    status: 'ok',
-    service: 'EstateXplorer API',
-    database: states[dbState] || 'unknown',
-    time: new Date(),
-  });
-});
-
 const connectDB = require('./config/db');
 
 // Ensure database connection for all environments (including Vercel serverless functions)
@@ -54,6 +41,20 @@ app.use(async (req, res, next) => {
     console.error('Database connection error in request lifecycle:', err.message);
     next(err);
   }
+});
+
+// Health check endpoint (reports live server and db status with diagnostic details)
+app.get('/api/health', (req, res) => {
+  const mongoose = require('mongoose');
+  const dbState = mongoose.connection.readyState;
+  const states = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+  res.status(200).json({
+    status: 'ok',
+    service: 'EstateXplorer API',
+    database: states[dbState] || 'unknown',
+    hasMongoUri: Boolean(process.env.MONGODB_URI || process.env.MONGODB_DIRECT_URI),
+    time: new Date(),
+  });
 });
 
 // Middleware
