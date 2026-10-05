@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const ProjectUnit = require('../models/ProjectUnit');
 const Booking = require('../models/Booking');
 const Inquiry = require('../models/Inquiry');
@@ -8,10 +9,10 @@ const LeadAuditLog = require('../models/LeadAuditLog');
 const { emitToUser, emitToUsers, SOCKET_EVENTS } = require('./socketManager');
 
 /**
- * Generates unique booking reference e.g., BK-2026-A83F
+ * Generates unique booking reference e.g., BK-2026-A83F19BC
  */
 function generateBookingNumber() {
-  const code = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const code = crypto.randomBytes(6).toString('hex').toUpperCase();
   const year = new Date().getFullYear();
   return `BK-${year}-${code}`;
 }
@@ -37,128 +38,168 @@ async function bookUnit({
   paymentRef = '',
   notes = '',
 }) {
-  const lead = await Inquiry.findById(leadId);
-  if (!lead) {
-    throw new Error('Lead (Inquiry) not found.');
-  }
-
-  // Find candidate unit and verify it exists
-  const candidateUnit = await ProjectUnit.findById(unitId);
-  if (!candidateUnit) {
-    throw new Error('Unit not found in project inventory.');
-  }
-
-  const projectId = candidateUnit.project;
-  const builderId = candidateUnit.builder;
-  const isAttributed = !!lead.isAttributed && !!lead.agent;
-  const agentId = lead.agent || null;
-
-  // Resolve commission rate if attributed
-  let commissionRate = 0;
-  if (isAttributed) {
-    const partnership = await Partnership.findOne({ agent: agentId, project: projectId, status: 'approved' });
-    commissionRate = partnership?.commissionRate || 2.5;
-  }
-
-  const commissionAmount = isAttributed ? (Number(agreementValue) * commissionRate) / 100 : 0;
-  const bookingNumber = generateBookingNumber();
-
-  // ATOMIC CONCURRENCY-SAFE UPDATE
-  // If two requests hit simultaneously, only one will match status: 'available'
-  const bookedUnit = await ProjectUnit.findOneAndUpdate(
-    {
-      _id: unitId,
-      status: 'available',
-    },
-    {
-      $set: {
-        status: 'booked',
-        bookedByAgent: agentId,
-      },
-      $inc: { version: 1 },
-    },
-    { new: true }
-  );
-
-  if (!bookedUnit) {
-    const err = new Error('Unit is already booked or reserved by another transaction.');
-    err.statusCode = 409; // Conflict
+  const amount = Number(agreementValue);
+  const token = Number(tokenAmount);
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(token) || token < 0 || token > amount) {
+    const err = new Error('Agreement value and token amount must be valid; token amount cannot exceed agreement value.');
+    err.statusCode = 400;
     throw err;
   }
 
-  // Create immutable Booking record
-  const booking = await Booking.create({
-    bookingNumber,
-    project: projectId,
-    unit: bookedUnit._id,
-    builder: builderId,
-    buyer: lead.user || null,
-    agent: agentId,
-    lead: lead._id,
-    isAttributed,
-    agreementValue: Number(agreementValue),
-    tokenAmount: Number(tokenAmount),
-    tokenPaymentDate: new Date(),
-    paymentDetails: {
-      method: paymentMethod,
-      transactionRef: paymentRef || bookingNumber,
-      paidAt: new Date(),
-    },
-    commission: {
-      rate: commissionRate,
-      amount: commissionAmount,
-      status: isAttributed ? 'due' : 'paid',
-    },
-    status: 'confirmed',
-    notes,
-  });
+  const session = await mongoose.startSession();
+  let booking;
+  let bookedUnit;
+  let projectId;
+  let builderId;
+  let agentId;
+  let isAttributed;
+  let commissionRate;
+  let commissionAmount;
+  let previousStage;
 
-  // Link booking back to unit
-  bookedUnit.bookingId = booking._id;
-  await bookedUnit.save();
+  try {
+    await session.withTransaction(async () => {
+      const lead = await Inquiry.findById(leadId).session(session);
+      if (!lead) {
+        const err = new Error('Lead (Inquiry) not found.');
+        err.statusCode = 404;
+        throw err;
+      }
+      if (lead.bookingRef || lead.bookedUnit || ['unit_booked', 'commission_due', 'commission_paid'].includes(lead.lifecycleStage)) {
+        const err = new Error('This lead already has a booking.');
+        err.statusCode = 409;
+        throw err;
+      }
 
-  // Update lead CRM stage
-  const prevStage = lead.lifecycleStage || 'new';
-  lead.lifecycleStage = 'unit_booked';
-  lead.bookedUnit = bookedUnit._id;
-  lead.bookingRef = booking._id;
-  lead.tokenAmount = Number(tokenAmount);
-  await lead.save();
+      const candidateUnit = await ProjectUnit.findById(unitId).session(session);
+      if (!candidateUnit) {
+        const err = new Error('Unit not found in project inventory.');
+        err.statusCode = 404;
+        throw err;
+      }
+      projectId = candidateUnit.project;
+      builderId = candidateUnit.builder;
+      const project = await Property.findById(projectId).select('builder user price').session(session);
+      if (!project) {
+        const err = new Error('Project associated with this unit no longer exists.');
+        err.statusCode = 409;
+        throw err;
+      }
+      const projectOwnerId = project.builder || project.user;
+      if (!projectOwnerId || String(projectOwnerId) !== String(builderId)) {
+        const err = new Error('Inventory ownership does not match the project owner.');
+        err.statusCode = 409;
+        throw err;
+      }
+      const leadProjectId = lead.project || lead.property;
+      if (!leadProjectId || String(leadProjectId) !== String(projectId)) {
+        const err = new Error('The selected lead does not belong to this project.');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (!lead.builder || String(lead.builder) !== String(builderId)) {
+        const err = new Error('The selected lead is not assigned to this project builder.');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (actorUser.role === 'builder' && String(project.builder || project.user) !== String(actorUser._id)) {
+        const err = new Error('You do not own this project.');
+        err.statusCode = 403;
+        throw err;
+      }
 
-  // Decrement available units on master project
-  await Property.findByIdAndUpdate(projectId, {
-    $inc: { availableUnitsCount: -1, sold: 1 }
-  });
-
-  // Update partnership metrics if attributed
-  if (isAttributed) {
-    await Partnership.findOneAndUpdate(
-      { agent: agentId, project: projectId },
-      {
-        $inc: {
-          'metrics.totalBookings': 1,
-          'metrics.totalCommissionEarned': commissionAmount,
+      isAttributed = !!lead.isAttributed && !!lead.agent;
+      agentId = isAttributed ? lead.agent : null;
+      if (actorUser.role === 'agent' && (!isAttributed || String(agentId) !== String(actorUser._id))) {
+        const err = new Error('Agents may book only leads assigned to them.');
+        err.statusCode = 403;
+        throw err;
+      }
+      let partnership = null;
+      if (isAttributed) {
+        partnership = await Partnership.findOne({ agent: agentId, project: projectId, status: 'approved' }).session(session);
+        if (!partnership) {
+          const err = new Error('The agent does not have an active approved partnership for this project.');
+          err.statusCode = 403;
+          throw err;
         }
       }
-    );
-  }
+      commissionRate = partnership ? Number(partnership.commissionRate) : 0;
+      commissionAmount = (amount * commissionRate) / 100;
+      previousStage = lead.lifecycleStage || 'new';
 
-  // Record immutable LeadAuditLog
-  await LeadAuditLog.create({
-    lead: lead._id,
-    actor: actorUser._id,
-    actorRole: actorUser.role,
-    action: 'UNIT_BOOKED',
-    previousStage: prevStage,
-    newStage: 'unit_booked',
-    metadata: {
-      bookingNumber,
-      unitNumber: bookedUnit.unitNumber,
-      tower: bookedUnit.tower,
-      agreementValue,
-      commissionAmount,
-    },
-  });
+      bookedUnit = await ProjectUnit.findOneAndUpdate(
+        { _id: unitId, project: projectId, builder: builderId, status: 'available' },
+        { $set: { status: 'booked', bookedByAgent: agentId }, $inc: { version: 1 } },
+        { new: true, session }
+      );
+      if (!bookedUnit) {
+        const err = new Error('Unit is already booked or reserved by another transaction.');
+        err.statusCode = 409;
+        throw err;
+      }
+
+      const bookingNumber = generateBookingNumber();
+      [booking] = await Booking.create([{
+        bookingNumber,
+        project: projectId,
+        unit: bookedUnit._id,
+        builder: builderId,
+        buyer: lead.user || null,
+        buyerName: lead.name,
+        buyerPhone: lead.phone,
+        buyerEmail: lead.email,
+        basePrice: Number(bookedUnit.price || project.price),
+        agent: agentId,
+        lead: lead._id,
+        isAttributed,
+        agreementValue: amount,
+        tokenAmount: token,
+        tokenPaymentDate: paymentRef ? new Date() : null,
+        paymentDetails: paymentRef ? { method: paymentMethod, transactionRef: paymentRef, paidAt: new Date() } : undefined,
+        commission: { rate: commissionRate, amount: commissionAmount, status: isAttributed ? 'due' : 'not_applicable' },
+        status: 'confirmed',
+        notes,
+      }], { session });
+
+      bookedUnit.bookingId = booking._id;
+      await bookedUnit.save({ session });
+      lead.lifecycleStage = 'unit_booked';
+      lead.bookedUnit = bookedUnit._id;
+      lead.bookingRef = booking._id;
+      lead.tokenAmount = token;
+      await lead.save({ session });
+
+      const projectUpdate = await Property.updateOne(
+        { _id: projectId, availableUnitsCount: { $gt: 0 } },
+        { $inc: { availableUnitsCount: -1, sold: 1 } },
+        { session }
+      );
+      if (projectUpdate.modifiedCount !== 1) {
+        const err = new Error('Project inventory counters are inconsistent; booking was not committed.');
+        err.statusCode = 409;
+        throw err;
+      }
+      if (partnership) {
+        await Partnership.updateOne(
+          { _id: partnership._id, status: 'approved' },
+          { $inc: { 'metrics.totalBookings': 1, 'metrics.totalCommissionEarned': commissionAmount } },
+          { session }
+        );
+      }
+      await LeadAuditLog.create([{
+        lead: lead._id,
+        actor: actorUser._id,
+        actorRole: actorUser.role,
+        action: 'UNIT_BOOKED',
+        previousStage,
+        newStage: 'unit_booked',
+        metadata: { bookingNumber, unitNumber: bookedUnit.unitNumber, tower: bookedUnit.tower, agreementValue: amount, commissionAmount },
+      }], { session });
+    });
+  } finally {
+    await session.endSession();
+  }
 
   // Real-time events — Spec §41: BOOKING_CREATED + INVENTORY_STATUS_CHANGED
   const bookingPayload = {
@@ -196,24 +237,49 @@ async function bookUnit({
 /**
  * Marks commission as paid (by Builder)
  */
-async function markCommissionPaid(builderId, bookingId) {
-  const booking = await Booking.findById(bookingId);
-  if (!booking) throw new Error('Booking not found.');
-  if (String(booking.builder) !== String(builderId)) {
-    throw new Error('Unauthorized. You do not own the project for this booking.');
-  }
+async function markCommissionPaid(actor, bookingId, transactionRef) {
+  if (!String(transactionRef || '').trim()) throw new Error('A payment reference is required to record commission settlement.');
+  const session = await mongoose.startSession();
+  let booking;
+  try {
+    await session.withTransaction(async () => {
+      booking = await Booking.findById(bookingId).session(session);
+      if (!booking) throw new Error('Booking not found.');
+      if (actor.role !== 'admin' && String(booking.builder) !== String(actor._id)) {
+        const err = new Error('Unauthorized. You do not own the project for this booking.');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (!booking.isAttributed || booking.commission.status === 'not_applicable') {
+        throw new Error('This booking has no agent commission to settle.');
+      }
+      if (booking.commission.status === 'paid') throw new Error('Commission is already marked as paid.');
+      booking.commission.status = 'paid';
+      booking.commission.paidAt = new Date();
+      booking.commission.transactionRef = String(transactionRef).trim().slice(0, 200);
+      await booking.save({ session });
 
-  booking.commission.status = 'paid';
-  booking.commission.paidAt = new Date();
-  await booking.save();
-
-  // Update Lead lifecycle
-  if (booking.lead) {
-    await Inquiry.findByIdAndUpdate(booking.lead, {
-      lifecycleStage: 'commission_paid'
+      if (booking.lead) {
+        const lead = await Inquiry.findById(booking.lead).session(session);
+        if (lead) {
+          const previousStage = lead.lifecycleStage || 'unit_booked';
+          lead.lifecycleStage = 'commission_paid';
+          await lead.save({ session });
+          await LeadAuditLog.create([{
+            lead: lead._id,
+            actor: actor._id,
+            actorRole: actor.role,
+            action: 'COMMISSION_PAID',
+            previousStage,
+            newStage: 'commission_paid',
+            metadata: { bookingNumber: booking.bookingNumber, transactionRef: booking.commission.transactionRef },
+          }], { session });
+        }
+      }
     });
+  } finally {
+    await session.endSession();
   }
-
   return booking;
 }
 

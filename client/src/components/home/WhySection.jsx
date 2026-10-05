@@ -52,4 +52,5 @@ const WhySection = () => {
   );
 };
 
-export default WhySection;
+export default React.memo(WhySection);
+

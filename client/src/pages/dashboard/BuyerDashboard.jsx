@@ -217,7 +217,7 @@ const BuyerDashboard = () => {
       loadRecentlyViewed();
       fetchBuyerData();
     },
-    { revalidateOnFocus: true, intervalMs: 10000 }
+    { revalidateOnFocus: true, intervalMs: 30000 }
   );
 
   const removeWishlist = async (id) => {
@@ -234,6 +234,31 @@ const BuyerDashboard = () => {
       console.error('Failed to sync remove wishlist:', err);
     }
   };
+
+  const scrollToSection = (e, id) => {
+    e.preventDefault();
+    const el = document.getElementById(id);
+    if (el) {
+      const yOffset = -75;
+      const y = el.getBoundingClientRect().top + window.pageYOffset + yOffset;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    }
+  };
+
+  useEffect(() => {
+    if (window.location.hash) {
+      const id = window.location.hash.replace('#', '');
+      const timer = setTimeout(() => {
+        const el = document.getElementById(id);
+        if (el) {
+          const yOffset = -75;
+          const y = el.getBoundingClientRect().top + window.pageYOffset + yOffset;
+          window.scrollTo({ top: y, behavior: 'smooth' });
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return 'Just now';
@@ -269,17 +294,17 @@ const BuyerDashboard = () => {
 
           <div className="nav-section">
             <div className="nav-section-label">Saved &amp; Inquiries</div>
-            <a className="nav-item" href="#saved-properties">
+            <a className="nav-item" href="#saved-properties" onClick={(e) => scrollToSection(e, 'saved-properties')}>
               <Heart size={16} />
               Saved Properties
               {savedProperties.length > 0 && <span className="badge">{savedProperties.length}</span>}
             </a>
-            <a className="nav-item" href="#open-enquiries">
+            <a className="nav-item" href="#open-enquiries" onClick={(e) => scrollToSection(e, 'open-enquiries')}>
               <MessageSquare size={16} />
               My Enquiries
               {inquiries.length > 0 && <span className="badge">{inquiries.length}</span>}
             </a>
-            <a className="nav-item" href="#site-visits">
+            <a className="nav-item" href="#site-visits" onClick={(e) => scrollToSection(e, 'site-visits')}>
               <Calendar size={16} />
               Site Visits
               {upcomingVisits.length > 0 && <span className="badge warning">{upcomingVisits.length}</span>}
@@ -315,13 +340,22 @@ const BuyerDashboard = () => {
         </nav>
 
         <div className="sidebar-footer">
-          <div className="user-profile">
-            <div className="user-avatar">{initials}</div>
+          <Link to="/dashboard/profile" className="user-profile">
+            <div className="user-avatar" style={{ overflow: 'hidden' }}>
+              {user?.avatar ? (
+                <img
+                  src={user.avatar}
+                  alt={user.name}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              ) : initials}
+            </div>
             <div className="user-info">
               <div className="user-name">{user?.name || 'User Name'}</div>
               <div className="user-email">{user?.email || 'user@email.com'}</div>
             </div>
-          </div>
+          </Link>
         </div>
       </aside>
 
@@ -592,4 +626,4 @@ const BuyerDashboard = () => {
   );
 };
 
-export default BuyerDashboard;
+export default React.memo(BuyerDashboard);

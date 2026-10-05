@@ -1,5 +1,6 @@
 const NotificationLog = require('../models/NotificationLog');
 const { sendSmsGateway } = require('../services/smsNotificationService');
+const sendEmail = require('../utils/sendEmail');
 const AppError = require('../utils/AppError');
 
 exports.sendTestSms = async (req, res, next) => {
@@ -52,7 +53,6 @@ exports.sendTestEmail = async (req, res, next) => {
       return next(new AppError('Email address is required to send test email alert', 400));
     }
 
-    const sendEmail = require('../utils/sendEmail');
     await sendEmail({
       email: targetEmail,
       subject: 'EstateXplorer Alert Gateway: Email Notifications Active',
@@ -105,14 +105,16 @@ exports.getNotificationLogs = async (req, res, next) => {
       query = { $or: orClauses };
     }
 
-    const total = await NotificationLog.countDocuments(query);
-    const logs = await NotificationLog.find(query)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    const unreadCount = await NotificationLog.countDocuments({ ...query, isRead: false });
+    // Parallelize count, unread count, and paginated logs retrieval in one round-trip
+    const [total, unreadCount, logs] = await Promise.all([
+      NotificationLog.countDocuments(query),
+      NotificationLog.countDocuments({ ...query, isRead: false }),
+      NotificationLog.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -131,19 +133,25 @@ exports.getNotificationLogs = async (req, res, next) => {
 exports.markAsRead = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const notification = await NotificationLog.findById(id);
+    const filter = { _id: id };
+    if (req.user.role !== 'admin') {
+      filter.recipient = req.user._id;
+    }
+
+    const notification = await NotificationLog.findOneAndUpdate(
+      filter,
+      { $set: { isRead: true } },
+      { new: true }
+    ).lean();
 
     if (!notification) {
+      // Check if it exists for another user vs not found
+      const exists = await NotificationLog.exists({ _id: id });
+      if (exists) {
+        return next(new AppError('Not authorized to update this notification', 403));
+      }
       return next(new AppError('Notification not found', 404));
     }
-
-    // Verify ownership unless admin
-    if (req.user.role !== 'admin' && String(notification.recipient) !== String(req.user._id)) {
-      return next(new AppError('Not authorized to update this notification', 403));
-    }
-
-    notification.isRead = true;
-    await notification.save();
 
     res.status(200).json({
       success: true,

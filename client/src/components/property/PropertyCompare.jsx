@@ -51,8 +51,8 @@ const PropertyCompare = ({ currentProperty }) => {
     const el = tableWrapRef.current;
     if (!el) return;
     checkScroll();
-    el.addEventListener('scroll', checkScroll);
-    window.addEventListener('resize', checkScroll);
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    window.addEventListener('resize', checkScroll, { passive: true });
     return () => {
       el.removeEventListener('scroll', checkScroll);
       window.removeEventListener('resize', checkScroll);
@@ -872,4 +872,5 @@ const PropertyCompare = ({ currentProperty }) => {
   );
 };
 
-export default PropertyCompare;
+export default React.memo(PropertyCompare);
+

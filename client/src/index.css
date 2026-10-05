@@ -1,7 +1,112 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* ============================================================
+   Tailwind CSS v4 — entry point
+   Use @import instead of deprecated @tailwind directives
+   ============================================================ */
+@import "tailwindcss";
 
+/* ============================================================
+   Custom Theme — migrated from tailwind.config.js for v4
+   ============================================================ */
+@theme {
+  /* Colors — Navy */
+  --color-navy: #091322;
+  --color-navy-mid: #11223b;
+  --color-navy-soft: rgba(9, 19, 34, 0.06);
+  --color-navy-light: #1e293b;
+
+  /* Colors — Gold */
+  --color-gold: #b89358;
+  --color-gold-light: #cfad76;
+  --color-gold-soft: rgba(184, 147, 88, 0.12);
+
+  /* Colors — Other */
+  --color-sky: #7ba7dc;
+  --color-blue-mid: #3b82f6;
+  --color-blue-soft: rgba(59, 130, 246, 0.08);
+  --color-success: #10b981;
+  --color-surface: #ffffff;
+  --color-bg: #f8fafc;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-muted: #64748b;
+  --color-light: #94a3b8;
+
+  /* Colors — Slate */
+  --color-slate-950: #020617;
+  --color-slate-900: #0f172a;
+  --color-slate-800: #1e293b;
+  --color-slate-700: #334155;
+  --color-slate-600: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-400: #94a3b8;
+  --color-slate-300: #cbd5e1;
+  --color-slate-200: #e2e8f0;
+  --color-slate-100: #f1f5f9;
+  --color-slate-50: #f8fafc;
+
+  /* Font Families */
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Font Sizes */
+  --font-size-2xs: 0.6875rem;
+  --line-height-2xs: 0.95rem;
+  --font-size-xs: 0.75rem;
+  --line-height-xs: 1.1rem;
+  --font-size-sm: 0.875rem;
+  --line-height-sm: 1.35rem;
+  --font-size-base: 1rem;
+  --line-height-base: 1.6rem;
+  --font-size-lg: 1.125rem;
+  --line-height-lg: 1.75rem;
+  --font-size-xl: 1.25rem;
+  --line-height-xl: 1.85rem;
+  --font-size-2xl: 1.5rem;
+  --line-height-2xl: 2rem;
+  --font-size-3xl: 1.875rem;
+  --line-height-3xl: 2.35rem;
+  --font-size-4xl: 2.25rem;
+  --line-height-4xl: 2.75rem;
+  --font-size-5xl: 3rem;
+  --line-height-5xl: 3.5rem;
+
+  /* Border Radius */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-md: 14px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-pill: 9999px;
+
+  /* Box Shadows */
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 2px 8px -2px rgba(15, 23, 42, 0.05), 0 1px 4px -1px rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 8px 24px -4px rgba(15, 23, 42, 0.07), 0 4px 8px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 16px 36px -6px rgba(15, 23, 42, 0.1), 0 8px 16px -4px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 24px 50px -12px rgba(15, 23, 42, 0.15);
+  --shadow-luxury: 0 20px 40px -15px rgba(9, 19, 34, 0.09), 0 0 0 1px rgba(9, 19, 34, 0.04);
+
+  /* Max Width */
+  --width-container: 1280px;
+
+  /* Letter Spacing */
+  --tracking-tightest: -0.035em;
+  --tracking-tighter: -0.025em;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
+  --tracking-widest: 0.1em;
+
+  /* Transition Timing */
+  --ease-luxury: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ============================================================
+   Base styles
+   ============================================================ */
 @layer base {
   :root {
     --bg: #f8fafc;
@@ -18,15 +123,6 @@
     --gold-light: #cfad76;
     --blue-mid: #3b82f6;
     --success: #10b981;
-    --radius-sm: 8px;
-    --radius: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 20px;
-    --radius-2xl: 24px;
-    --shadow-sm: 0 2px 8px -2px rgba(15, 23, 42, 0.05), 0 1px 4px -1px rgba(15, 23, 42, 0.03);
-    --shadow-md: 0 8px 24px -4px rgba(15, 23, 42, 0.07), 0 4px 8px -2px rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 16px 36px -6px rgba(15, 23, 42, 0.1), 0 8px 16px -4px rgba(15, 23, 42, 0.05);
-    --shadow-luxury: 0 20px 40px -15px rgba(9, 19, 34, 0.09), 0 0 0 1px rgba(9, 19, 34, 0.04);
     --t: 0.25s cubic-bezier(0.22, 1, 0.36, 1);
   }
 
@@ -63,7 +159,9 @@
   }
 }
 
-/* Custom Scrollbar */
+/* ============================================================
+   Custom Scrollbar
+   ============================================================ */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -79,7 +177,9 @@
   background: #94a3b8;
 }
 
-/* Luxury Card & Glassmorphism Utilities */
+/* ============================================================
+   Luxury Card & Glassmorphism Utilities
+   ============================================================ */
 .glass-card {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(12px);
@@ -102,7 +202,9 @@
   transform: translateY(-2px);
 }
 
-/* Nav Link Underline Effect */
+/* ============================================================
+   Nav Link Underline Effect
+   ============================================================ */
 .nav-link-item {
   position: relative;
   transition: all 0.2s ease;
@@ -126,7 +228,9 @@
   left: 12px;
 }
 
-/* Animation utilities */
+/* ============================================================
+   Animation utilities
+   ============================================================ */
 .reveal {
   opacity: 0;
   transform: translateY(20px);

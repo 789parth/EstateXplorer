@@ -35,14 +35,27 @@ const NotificationBell = () => {
     }
   }, [isAuthenticated]);
 
-  // Initial fetch and auto-polling every 20 seconds for real-time alerts
+  // Initial fetch and auto-polling (paused when document is hidden in background tab)
   useEffect(() => {
     if (isAuthenticated) {
       fetchNotifications(false);
       const interval = setInterval(() => {
-        fetchNotifications(true);
-      }, 20000);
-      return () => clearInterval(interval);
+        if (typeof document !== 'undefined' && !document.hidden) {
+          fetchNotifications(true);
+        }
+      }, 30000);
+
+      const handleVisibilityChange = () => {
+        if (typeof document !== 'undefined' && !document.hidden) {
+          fetchNotifications(true);
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      return () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     }
   }, [isAuthenticated, fetchNotifications]);
 
@@ -222,4 +235,5 @@ const NotificationBell = () => {
   );
 };
 
-export default NotificationBell;
+export default React.memo(NotificationBell);
+

@@ -72,31 +72,32 @@ async function runStrictRoleApprovalTests() {
       roles: ['buyer', 'admin'],
     });
 
-    // 2. Test: Direct sign-up attempt with 'agent' role -> BLOCKED with 403 Forbidden!
-    const registerAgentReq = createMockReq({
-      name: 'Agent Applicant',
-      email: testEmail,
-      phone: '+91 9876543210',
+    // 2. Test: Direct sign-up attempt with 'admin' role -> BLOCKED with 403 Forbidden!
+    const registerAdminReq = createMockReq({
+      name: 'Admin Applicant',
+      email: `fakeadmin_${testTime}@gmail.com`,
+      phone: `+91 9${String(testTime).slice(-9)}`,
       password: 'Password@123',
-      role: 'agent',
+      role: 'admin',
     });
-    const registerAgentRes = createMockRes();
-    let registerAgentError = null;
+    const registerAdminRes = createMockRes();
+    let registerAdminError = null;
 
-    await authController.register(registerAgentReq, registerAgentRes, (err) => {
-      registerAgentError = err;
+    await authController.register(registerAdminReq, registerAdminRes, (err) => {
+      registerAdminError = err;
     });
 
     assert(
-      registerAgentError !== null && registerAgentError.statusCode === 403,
-      'Test 1: Direct sign-up with unapproved "agent" role is strictly BLOCKED with 403 Forbidden'
+      registerAdminError !== null && registerAdminError.statusCode === 403,
+      'Test 1: Direct sign-up with "admin" role is strictly BLOCKED with 403 Forbidden'
     );
 
     // 3. Test: Sign-up as default 'buyer' -> SUCCEEDS (201 Created)!
+    const testPhone = `+91 ${String(testTime).slice(-10)}`;
     const registerBuyerReq = createMockReq({
       name: 'Agent Applicant',
       email: testEmail,
-      phone: '+91 9876543210',
+      phone: testPhone,
       password: 'Password@123',
       role: 'buyer',
     });

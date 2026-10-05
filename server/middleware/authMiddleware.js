@@ -17,9 +17,12 @@ const protect = async (req, res, next) => {
   }
 
   try {
+    if (!process.env.JWT_ACCESS_SECRET || process.env.JWT_ACCESS_SECRET.length < 32) {
+      throw new Error('JWT access secret is not configured securely.');
+    }
     const decoded = jwt.verify(
       token,
-      process.env.JWT_ACCESS_SECRET || 'estatexplorer_access_secret'
+      process.env.JWT_ACCESS_SECRET
     );
 
     // Attach user to req
@@ -86,9 +89,12 @@ const optionalAuth = async (req, res, next) => {
   if (!token) return next(); // no token — just continue as guest
 
   try {
+    if (!process.env.JWT_ACCESS_SECRET || process.env.JWT_ACCESS_SECRET.length < 32) {
+      return next();
+    }
     const decoded = jwt.verify(
       token,
-      process.env.JWT_ACCESS_SECRET || 'estatexplorer_access_secret'
+      process.env.JWT_ACCESS_SECRET
     );
     const user = await User.findById(decoded.id)
       .select('name email role roles isVerified isBlocked blockedReason')

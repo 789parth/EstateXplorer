@@ -55,5 +55,7 @@ const roleRequestSchema = new mongoose.Schema(
 // Compound index for efficient duplicate checking and querying
 roleRequestSchema.index({ userId: 1, requestedRole: 1, status: 1 });
 roleRequestSchema.index({ email: 1, status: 1 });
+roleRequestSchema.index({ status: 1, requestedAt: -1 });
+roleRequestSchema.index({ requestedAt: -1 });
 
 module.exports = mongoose.model('RoleRequest', roleRequestSchema);

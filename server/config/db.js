@@ -16,16 +16,16 @@ if (!cached) {
 }
 
 // Direct replica set URI that completely bypasses SRV DNS resolution
-const FALLBACK_DIRECT_URI =
-  process.env.MONGODB_DIRECT_URI ||
-  'mongodb://parthadthakkar_db_user:%40234abcDEF@ac-l5qpsh1-shard-00-00.6futo0u.mongodb.net:27017,ac-l5qpsh1-shard-00-01.6futo0u.mongodb.net:27017,ac-l5qpsh1-shard-00-02.6futo0u.mongodb.net:27017/estatexplorer?ssl=true&replicaSet=atlas-tu4ych-shard-0&authSource=admin&retryWrites=true&w=majority';
-
 const connectDB = async () => {
   if (cached.conn && mongoose.connection.readyState === 1) {
     return cached.conn;
   }
 
-  const primaryUri = process.env.MONGODB_URI || FALLBACK_DIRECT_URI;
+  const fallbackDirectUri = process.env.MONGODB_DIRECT_URI;
+  const primaryUri = process.env.MONGODB_URI || fallbackDirectUri;
+  if (!primaryUri) {
+    throw new Error('Database configuration is missing. Set MONGODB_URI or MONGODB_DIRECT_URI.');
+  }
 
   if (!cached.promise) {
     const opts = {
@@ -45,8 +45,8 @@ const connectDB = async () => {
         return instance;
       } catch (err) {
         console.warn(`Primary connection attempt encountered issue (${err.message}). Connecting via Direct Replica Set...`);
-        if (primaryUri !== FALLBACK_DIRECT_URI) {
-          const directInstance = await mongoose.connect(FALLBACK_DIRECT_URI, opts);
+        if (fallbackDirectUri && primaryUri !== fallbackDirectUri) {
+          const directInstance = await mongoose.connect(fallbackDirectUri, opts);
           console.log(`MongoDB Connected via Direct Replica Set: ${directInstance.connection.host}`);
           return directInstance;
         }

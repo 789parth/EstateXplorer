@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import PropertyCompare from '../components/property/PropertyCompare';
@@ -39,16 +39,22 @@ const ComparePage = () => {
   }, []);
 
   // Update primary when category tab toggles
-  const handleCategorySwitch = (cat) => {
+  const handleCategorySwitch = useCallback((cat) => {
     setActiveCategory(cat);
     const match = properties.find((p) => (p.category || 'property') === cat);
     if (match) {
       setSelectedPrimaryId(String(match._id));
     }
-  };
+  }, [properties]);
 
-  const primaryProperty = properties.find((p) => String(p._id) === String(selectedPrimaryId));
-  const filteredCandidates = properties.filter((p) => (p.category || 'property') === activeCategory);
+  const primaryProperty = useMemo(
+    () => properties.find((p) => String(p._id) === String(selectedPrimaryId)),
+    [properties, selectedPrimaryId]
+  );
+  const filteredCandidates = useMemo(
+    () => properties.filter((p) => (p.category || 'property') === activeCategory),
+    [properties, activeCategory]
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pt-20">

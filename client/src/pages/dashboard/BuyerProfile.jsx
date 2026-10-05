@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { INDIAN_STATES } from '../../utils/indianStates';
 import { getProperties, getUserWishlist, toggleWishlistApi, getBuyerInquiries } from '../../services/propertyService';
-import { getRoleRequestsApi } from '../../services/adminService';
+import { getRoleRequestsApi, getKycRequestsApi } from '../../services/adminService';
 import { getContactMessagesApi } from '../../services/contactService';
 import { formatPhoneNumber, formatPrice, formatTitleCase, isValidIndianMobile } from '../../utils/formatters';
 import { Heart, X, ExternalLink, Building2, MapPin, MessageSquare, Calendar, ShieldCheck, Clock, Shield, Users, UserCheck } from 'lucide-react';
@@ -20,6 +20,7 @@ const BuyerProfile = () => {
   const [inquiriesCount, setInquiriesCount] = useState(0);
   const [visitsCount, setVisitsCount] = useState(0);
   const [adminPendingCount, setAdminPendingCount] = useState(0);
+  const [adminPendingKycCount, setAdminPendingKycCount] = useState(0);
   const [adminNewContactsCount, setAdminNewContactsCount] = useState(0);
   const [loadingWishlist, setLoadingWishlist] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
@@ -88,8 +89,10 @@ const BuyerProfile = () => {
       try {
         const inqRes = await getBuyerInquiries();
         if (inqRes.success && Array.isArray(inqRes.data)) {
-          setInquiriesCount(inqRes.data.length);
-          setVisitsCount(inqRes.data.filter((i) => i.status === 'visit').length);
+          const visits = inqRes.data.filter((i) => Boolean(i.visitRequested || i.status === 'visit'));
+          const generalInqs = inqRes.data.filter((i) => !Boolean(i.visitRequested || i.status === 'visit'));
+          setInquiriesCount(generalInqs.length);
+          setVisitsCount(visits.length);
         }
       } catch (e) {}
     };
@@ -104,6 +107,14 @@ const BuyerProfile = () => {
         .then((res) => {
           if (res?.success && Array.isArray(res?.data)) {
             setAdminPendingCount(res.data.filter((r) => r.status === 'PENDING').length);
+          }
+        })
+        .catch(() => {});
+
+      getKycRequestsApi()
+        .then((res) => {
+          if (res?.success && Array.isArray(res?.data)) {
+            setAdminPendingKycCount(res.data.filter((k) => k.kycVerification?.status === 'pending').length);
           }
         })
         .catch(() => {});
@@ -238,6 +249,21 @@ const BuyerProfile = () => {
                 </Link>
 
                 <Link
+                  to="/dashboard?tab=kyc"
+                  className="nav-item w-full text-left flex items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <ShieldCheck size={18} className="shrink-0" />
+                    <span>KYC Verifications</span>
+                  </span>
+                  {adminPendingKycCount > 0 && (
+                    <span className="px-1.5 py-0.5 text-[0.65rem] font-bold rounded-full bg-blue-600 text-white animate-pulse">
+                      {adminPendingKycCount}
+                    </span>
+                  )}
+                </Link>
+
+                <Link
                   to="/dashboard?tab=grant"
                   className="nav-item w-full text-left flex items-center gap-3"
                 >
@@ -314,7 +340,7 @@ const BuyerProfile = () => {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
               </div>
               <div>
-                <div className="brand-text">Estate<span>Xplorer</span></div>
+                <div className="brand-text"><Link to="/">Estate<span>Xplorer</span></Link></div>
                 <div className="role">{user?.role ? `${user.role.charAt(0).toUpperCase() + user.role.slice(1)} Account` : 'Buyer Account'}</div>
               </div>
             </div>
@@ -396,7 +422,9 @@ const BuyerProfile = () => {
       <div className="main">
         <header className="topbar">
           <div className="topbar-left">
-            <h1 className="page-title" style={{ margin: 0, paddingLeft: '8px' }}>My Profile</h1>
+            <h1 className="page-title" style={{ margin: 0, paddingLeft: '8px' }}>
+              {user?.role === 'admin' ? 'Administrator Profile' : 'My Profile'}
+            </h1>
           </div>
         </header>
 
@@ -414,7 +442,18 @@ const BuyerProfile = () => {
               </button>
             </div>
             <div className="profile-hero-info">
-              <h2 className="profile-name">{user?.name || 'User Name'}</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <h2 className="profile-name" style={{ margin: 0 }}>{user?.name || 'User Name'}</h2>
+                {user?.role === 'admin' ? (
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' }}>
+                    Platform Administrator
+                  </span>
+                ) : (
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: '999px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #dbeafe' }}>
+                    Buyer Account
+                  </span>
+                )}
+              </div>
               <p className="profile-email">{user?.email || 'user@email.com'}</p>
               <div className="profile-meta">
                 <span>

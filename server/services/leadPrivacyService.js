@@ -69,6 +69,9 @@ function projectLeadForUser(lead, user) {
       phone: maskPhone(rawPhone),
       buyerEmail: maskEmail(rawEmail),
       email: maskEmail(rawEmail),
+      user: doc.user && typeof doc.user === 'object'
+        ? { ...doc.user, phone: maskPhone(doc.user.phone || rawPhone), email: maskEmail(doc.user.email || rawEmail) }
+        : doc.user,
       maskedBuyerContact: maskPhone(rawPhone),
       isContactMasked: true,
       maskingNotice: 'Contact info protected by Authorized Channel Partner attribution.',

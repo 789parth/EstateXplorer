@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Property = require('../models/Property');
 const Inquiry = require('../models/Inquiry');
 const User = require('../models/User');
@@ -19,7 +20,7 @@ const {
   notifyBuyerOnStatusChangeEmail,
 } = require('../services/notificationEmailService');
 const { resolveAttribution } = require('../services/attributionEngine');
-const { projectLeadsForUser, projectLeadForUser } = require('../services/leadPrivacyService');
+const { projectLeadsForUser, projectLeadForUser, maskPhone, maskEmail } = require('../services/leadPrivacyService');
 const LeadAuditLog = require('../models/LeadAuditLog');
 const { emitToUser, emitToUsers, SOCKET_EVENTS } = require('../services/socketManager');
 
@@ -53,6 +54,41 @@ exports.createProperty = async (req, res, next) => {
 
     if (!['builder', 'agent', 'owner', 'admin'].includes(req.user.role)) {
       return next(new AppError('Not authorized to post properties with this account role', 403));
+    }
+
+    // MANDATORY DOCUMENT VERIFICATION GATE (Spec §KYC):
+    // Builder, Agent, and Owner MUST have their essential documents verified by Admin before adding property/project.
+    if (['builder', 'agent', 'owner'].includes(req.user.role)) {
+      const userDoc = await User.findById(currentUserId).select('kycVerification');
+      const kycStatus = userDoc?.kycVerification?.status || 'unverified';
+
+      if (kycStatus !== 'verified') {
+        const roleLabel = req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1);
+        if (kycStatus === 'pending') {
+          return res.status(403).json({
+            success: false,
+            requiresKyc: true,
+            kycStatus: 'pending',
+            message: `Your ${roleLabel} verification documents are pending administrator review. You will be able to add properties and projects once approved.`,
+          });
+        }
+        if (kycStatus === 'rejected') {
+          const reason = userDoc?.kycVerification?.rejectionReason || 'Documents did not meet criteria';
+          return res.status(403).json({
+            success: false,
+            requiresKyc: true,
+            kycStatus: 'rejected',
+            rejectionReason: reason,
+            message: `Your verification documents were rejected: ${reason}. Please re-upload your mandatory documents to post properties.`,
+          });
+        }
+        return res.status(403).json({
+          success: false,
+          requiresKyc: true,
+          kycStatus: 'unverified',
+          message: `Mandatory document verification required. As a ${roleLabel}, please upload and verify your Aadhar Card, PAN Card, and registration documents before adding properties or projects.`,
+        });
+      }
     }
 
     req.body.category = ['project', 'property'].includes(req.body.category)
@@ -162,7 +198,7 @@ exports.getProperties = async (req, res, next) => {
 
     query = Property.find(JSON.parse(queryStr)).populate({
       path: 'builder',
-      select: 'name email phone role builderProfile agentProfile ownerProfile',
+      select: 'name companyName role reraNumber',
     });
 
     if (req.query.sort) {
@@ -177,11 +213,12 @@ exports.getProperties = async (req, res, next) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const skip = (page - 1) * limit;
 
-    const total = await Property.countDocuments(JSON.parse(queryStr));
-    query = query.skip(skip).limit(limit);
-
-    // High performance lean query: plain objects without Mongoose document hydration overhead
-    const properties = await query.lean();
+    // Parallelize count + data fetch: saves one full DB round-trip
+    const parsedQuery = JSON.parse(queryStr);
+    const [total, properties] = await Promise.all([
+      Property.countDocuments(parsedQuery),
+      query.skip(skip).limit(limit).lean(),
+    ]);
 
     res.status(200).json({
       success: true,
@@ -204,7 +241,7 @@ exports.getProperty = async (req, res, next) => {
     const property = await Property.findById(req.params.id)
       .populate({
         path: 'builder',
-        select: 'name email phone role builderProfile agentProfile ownerProfile',
+        select: 'name companyName role reraNumber',
       })
       .lean();
 
@@ -224,36 +261,42 @@ exports.getProperty = async (req, res, next) => {
   }
 };
 
+// @desc    Persist first-touch attribution when an affiliate link is opened
+// @route   GET /api/properties/:id/attribution?agent=CODE
+// @access  Public
+exports.recordPropertyAttribution = async (req, res, next) => {
+  try {
+    const property = await Property.findById(req.params.id).select('_id isActive');
+    if (!property || !property.isActive) return next(new AppError('Property not found', 404));
+    const result = await resolveAttribution(req, property._id, req.query.agent || null, req.user?._id || null);
+    res.status(200).json({ success: true, data: { isAttributed: result.isAttributed } });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // @desc    Get featured properties
 // @route   GET /api/properties/featured
 // @access  Public
 exports.getFeatured = async (req, res, next) => {
   try {
     const category = req.query.category || 'property';
+    const baseFilter = { isActive: true, category };
 
-    let properties = await Property.find({
-      isFeatured: true,
-      isActive: true,
-      category,
-    })
-      .populate({
-        path: 'builder',
-        select: 'name role builderProfile agentProfile ownerProfile',
-      })
-      .limit(4)
-      .lean();
+    // Check cheaply if any featured listings exist before doing the full populate
+    const featuredCount = await Property.countDocuments({ ...baseFilter, isFeatured: true });
 
-    // Fallback: If no listings have isFeatured flag set, show latest active listings of category
-    if (properties.length === 0) {
-      properties = await Property.find({
-        isActive: true,
-        category,
-      })
+    let properties;
+    if (featuredCount > 0) {
+      properties = await Property.find({ ...baseFilter, isFeatured: true })
+        .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
+        .limit(4)
+        .lean();
+    } else {
+      // Fallback: latest active listings of this category
+      properties = await Property.find(baseFilter)
         .sort('-createdAt')
-        .populate({
-          path: 'builder',
-          select: 'name role builderProfile agentProfile ownerProfile',
-        })
+        .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
         .limit(4)
         .lean();
     }
@@ -282,7 +325,7 @@ exports.getMyProperties = async (req, res, next) => {
       ? { isActive: true }
       : { builder: currentUserId, isActive: true };
 
-    const properties = await Property.find(filter).sort('-createdAt').lean();
+    const properties = await Property.find(filter).sort('-createdAt').limit(200).lean();
 
     res.status(200).json({
       success: true,
@@ -676,7 +719,6 @@ exports.submitInquiry = async (req, res, next) => {
       }
     }
 
-    const mongoose = require('mongoose');
     let property = null;
     let builderId = null;
 
@@ -690,6 +732,9 @@ exports.submitInquiry = async (req, res, next) => {
         }
         await property.save();
       }
+    }
+    if (!property || !property.isActive) {
+      return next(new AppError('Property not found or unavailable', 404));
     }
 
     // Resolve First-Touch Attribution (Master Project -> Agent Window)
@@ -737,7 +782,7 @@ exports.submitInquiry = async (req, res, next) => {
       agentCode: attributionResult.agentCode || null,
       isAttributed: attributionResult.isAttributed,
       attributionExpiry: attributionResult.expiresAt || null,
-      lifecycleStage: 'new',
+      lifecycleStage: visitRequested ? 'site_visit_scheduled' : 'new',
     });
 
     // Record initial LeadAuditLog
@@ -761,7 +806,7 @@ exports.submitInquiry = async (req, res, next) => {
     // If attributed, agent also receives notification
     if (attributionResult.agent) {
       User.findById(attributionResult.agent)
-        .select('name email phone smsNotifications emailNotifications')
+        .select('name email phone role smsNotifications emailNotifications')
         .then((agentUser) => {
           if (agentUser) {
             notifySellerOnNewLead({ sellerUser: agentUser, inquiry, property }).catch(() => {});
@@ -773,7 +818,7 @@ exports.submitInquiry = async (req, res, next) => {
 
     if (builderId) {
       User.findById(builderId)
-        .select('name email phone smsNotifications emailNotifications')
+        .select('name email phone role smsNotifications emailNotifications')
         .then((sellerUser) => {
           if (sellerUser) {
             notifySellerOnNewLead({ sellerUser, inquiry, property }).catch((smsErr) => {
@@ -812,7 +857,6 @@ exports.submitInquiry = async (req, res, next) => {
     }
     // Builder gets masked notification (no full buyer contact — spec §16)
     if (builderId) {
-      const { maskPhone, maskEmail } = require('../services/leadPrivacyService');
       emitToUser(String(builderId), SOCKET_EVENTS.NEW_ATTRIBUTED_LEAD, {
         inquiryId: inquiry._id,
         propertyTitle: inquiry.propertyTitle,
@@ -870,51 +914,40 @@ exports.getMyInquiries = async (req, res, next) => {
       return next(new AppError('Not authorized to access this route', 403));
     }
 
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-    // Auto-reject unanswered inquiries older than 7 days
-    await Inquiry.updateMany(
-      {
-        status: { $in: ['new', 'visit'] },
-        createdAt: { $lte: sevenDaysAgo },
-      },
-      {
-        $set: {
-          status: 'rejected',
-          lifecycleStage: 'rejected',
-          rejectionReason: 'Auto-rejected after 7 days unanswered',
-          rejectedAt: now,
-        },
-      }
-    );
+    // Auto-reject stale inquiries asynchronously — does not block the response
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    Inquiry.updateMany(
+      { status: { $in: ['new', 'visit'] }, createdAt: { $lte: sevenDaysAgo } },
+      { $set: { status: 'rejected', lifecycleStage: 'rejected', rejectionReason: 'Auto-rejected after 7 days unanswered', rejectedAt: new Date() } }
+    ).catch(() => {});
 
     const currentUserId = (req.user.id || req.user._id)?.toString();
 
 
     let rawInquiries;
 
-    // Build role-scoped query
+    // Build role-scoped query — fetch owned property IDs only once (deduplicated)
     const targetRole = req.query.role || activeRole;
     const orConditions = [];
 
     if (targetRole === 'agent' && (userRoles.includes('agent') || activeRole === 'agent')) {
-      // Agent sees inquiries and site visits attributed to their agentCode/account
+      // Agent sees inquiries attributed to their account
       orConditions.push({ agent: currentUserId });
-    } else if ((targetRole === 'builder' || targetRole === 'owner') && (userRoles.includes('builder') || userRoles.includes('owner') || activeRole === 'builder' || activeRole === 'owner')) {
-      // Builder / Owner sees inquiries and site visits for their properties
-      const ownedProperties = await Property.find({ builder: currentUserId }).select('_id').lean();
-      const ownedPropIds = ownedProperties.map((p) => p._id);
+    } else if (
+      (targetRole === 'builder' || targetRole === 'owner') &&
+      (userRoles.includes('builder') || userRoles.includes('owner') || activeRole === 'builder' || activeRole === 'owner')
+    ) {
+      // Builder / Owner: single DB call for owned property IDs
+      const ownedPropIds = (await Property.find({ builder: currentUserId }).select('_id').lean()).map((p) => p._id);
       orConditions.push({ builder: currentUserId });
       if (ownedPropIds.length > 0) {
         orConditions.push({ property: { $in: ownedPropIds } });
         orConditions.push({ project: { $in: ownedPropIds } });
       }
     } else {
-      // Multi-role fallback without specific role parameter
+      // Multi-role fallback — fetch owned props once, reuse for both builder+agent branches
       if (userRoles.includes('builder') || userRoles.includes('owner')) {
-        const ownedProperties = await Property.find({ builder: currentUserId }).select('_id').lean();
-        const ownedPropIds = ownedProperties.map((p) => p._id);
+        const ownedPropIds = (await Property.find({ builder: currentUserId }).select('_id').lean()).map((p) => p._id);
         orConditions.push({ builder: currentUserId });
         if (ownedPropIds.length > 0) {
           orConditions.push({ property: { $in: ownedPropIds } });
@@ -932,12 +965,11 @@ exports.getMyInquiries = async (req, res, next) => {
       .populate('property', 'title type bhk location priceDisplay images category allowAgentAcquisition')
       .populate('project', 'title type location priceDisplay images category allowAgentAcquisition')
       .populate('user', 'name email phone')
-      .populate('agent', 'name email phone agencyName agentCode agentProfile')
-      .populate('builder', 'name email phone companyName builderProfile')
+      .populate('agent', 'name email phone agencyName agentCode')
+      .populate('builder', 'name companyName role reraNumber')
       .sort('-createdAt')
+      .limit(300)
       .lean();
-
-
 
     // Apply strict server-side masking projection
     const projectedInquiries = projectLeadsForUser(rawInquiries, req.user);
@@ -972,30 +1004,19 @@ exports.getBuyerInquiries = async (req, res, next) => {
       ));
     }
 
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    // Auto-reject unanswered inquiries older than 7 days
-    await Inquiry.updateMany(
-      {
-        status: { $in: ['new', 'visit'] },
-        createdAt: { $lte: sevenDaysAgo },
-      },
-      {
-        $set: {
-          status: 'rejected',
-          lifecycleStage: 'rejected',
-          rejectionReason: 'Auto-rejected after 7 days unanswered',
-          rejectedAt: now,
-        },
-      }
-    );
+    // Auto-reject stale inquiries asynchronously — does not block the response
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    Inquiry.updateMany(
+      { status: { $in: ['new', 'visit'] }, createdAt: { $lte: sevenDaysAgo } },
+      { $set: { status: 'rejected', lifecycleStage: 'rejected', rejectionReason: 'Auto-rejected after 7 days unanswered', rejectedAt: new Date() } }
+    ).catch(() => {});
 
 
     const inquiries = await Inquiry.find({
       $or: [{ user: req.user.id }, { email: req.user.email }],
     })
-      .populate('property', 'title type location priceDisplay images bhk')
-      .populate('builder', 'name email phone builderProfile agentProfile ownerProfile')
+      .populate('property', 'title type category location priceDisplay images bhk')
+      .populate('builder', 'name companyName role reraNumber')
       .sort('-createdAt')
       .lean();
 
@@ -1028,10 +1049,14 @@ exports.updateInquiryStatus = async (req, res, next) => {
       ? inquiry.agent._id.toString()
       : (inquiry.agent ? inquiry.agent.toString() : null);
 
-    const isPropertyHolder =
+    let isPropertyHolder =
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
-      (inquiryAgentId && inquiryAgentId === currentUserId) ||
-      !inquiryBuilderId;
+      (inquiryAgentId && inquiryAgentId === currentUserId);
+    if (!inquiryBuilderId && !inquiryAgentId && inquiry.property) {
+      const linkedProperty = await Property.findById(inquiry.property).select('builder user').lean();
+      const linkedOwnerId = linkedProperty?.builder || linkedProperty?.user;
+      isPropertyHolder = !!linkedOwnerId && String(linkedOwnerId) === currentUserId;
+    }
 
     // Admin users who are not the property holder must NOT answer property inquiries
     if (req.user.role === 'admin' && !isPropertyHolder) {
@@ -1129,7 +1154,7 @@ exports.updateInquiryStatus = async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Inquiry status updated successfully',
-      data: inquiry,
+      data: projectLeadForUser(inquiry, req.user),
     });
   } catch (error) {
     next(error);
@@ -1151,11 +1176,18 @@ exports.deleteInquiry = async (req, res, next) => {
     const inquiryBuilderId = inquiry.builder?._id
       ? inquiry.builder._id.toString()
       : (inquiry.builder ? inquiry.builder.toString() : null);
+    const inquiryAgentId = inquiry.agent?._id
+      ? inquiry.agent._id.toString()
+      : (inquiry.agent ? inquiry.agent.toString() : null);
 
-    const isAuthorized =
-      req.user.role === 'admin' ||
+    let isAuthorized =
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
-      !inquiryBuilderId;
+      (inquiryAgentId && inquiryAgentId === currentUserId);
+    if (!isAuthorized && !inquiryBuilderId && !inquiryAgentId && inquiry.property) {
+      const linkedProperty = await Property.findById(inquiry.property).select('builder user').lean();
+      const linkedOwnerId = linkedProperty?.builder || linkedProperty?.user;
+      isAuthorized = !!linkedOwnerId && String(linkedOwnerId) === currentUserId;
+    }
 
     if (!isAuthorized) {
       return next(new AppError('Not authorized to delete this inquiry', 403));
@@ -1199,14 +1231,13 @@ exports.replyToPropertyInquiry = async (req, res, next) => {
       : (inquiry.agent ? inquiry.agent.toString() : null);
 
     let isAuthorized =
-      req.user.role === 'admin' ||
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
-      (inquiryAgentId && inquiryAgentId === currentUserId) ||
-      !inquiryBuilderId;
+      (inquiryAgentId && inquiryAgentId === currentUserId);
 
     if (!isAuthorized && inquiry.property) {
-      const prop = await Property.findById(inquiry.property).select('builder');
-      if (prop && prop.builder && prop.builder.toString() === currentUserId) {
+      const prop = await Property.findById(inquiry.property).select('builder user');
+      const linkedOwnerId = prop?.builder || prop?.user;
+      if (linkedOwnerId && String(linkedOwnerId) === currentUserId) {
         isAuthorized = true;
       }
     }
@@ -1272,6 +1303,7 @@ exports.replyToPropertyInquiry = async (req, res, next) => {
       });
     } catch (emailErr) {
       console.warn('[Property Inquiry Reply Email Warning]:', emailErr.message || emailErr);
+      return next(new AppError('Reply could not be delivered. The inquiry remains available for retry.', 502));
     }
 
     // Automatically delete inquiry from database after sending reply
@@ -1300,21 +1332,25 @@ exports.bulkDeleteInquiries = async (req, res, next) => {
 
     const currentUserId = (req.user.id || req.user._id)?.toString();
 
-    let filter = { _id: { $in: ids } };
-    if (req.user.role !== 'admin') {
-      const properties = await Property.find({ builder: currentUserId }).select('_id');
-      const propIds = properties.map((p) => p._id);
-      filter = {
-        _id: { $in: ids },
-        $or: [
-          { builder: currentUserId },
-          { property: { $in: propIds } },
-          { builder: null },
-        ],
-      };
+    if (!['builder', 'owner', 'agent'].includes(req.user.role)) {
+      return next(new AppError('Your role cannot delete property inquiries.', 403));
     }
+    const properties = await Property.find({ builder: currentUserId }).select('_id').lean();
+    const propIds = properties.map((p) => p._id);
+    const filter = {
+      _id: { $in: ids },
+      $or: [
+        { builder: currentUserId },
+        { agent: currentUserId },
+        ...(propIds.length ? [{ property: { $in: propIds } }, { project: { $in: propIds } }] : []),
+      ],
+    };
 
-    const result = await Inquiry.deleteMany(filter);
+    const ownedInquiries = await Inquiry.find(filter).select('_id').lean();
+    if (ownedInquiries.length !== ids.length) {
+      return next(new AppError('One or more inquiries are not available for your account.', 403));
+    }
+    const result = await Inquiry.deleteMany({ _id: { $in: ownedInquiries.map((item) => item._id) } });
 
     res.status(200).json({
       success: true,

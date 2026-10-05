@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, Suspense, lazy } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import Navbar from '../components/layout/Navbar';
@@ -15,14 +15,22 @@ import InsightsGrid from '../components/home/InsightsGrid';
 import ContactSection from '../components/home/ContactSection';
 import Footer from '../components/layout/Footer';
 import Modal from '../components/common/Modal';
-import LoginForm from '../components/auth/LoginForm';
-import RegisterForm from '../components/auth/RegisterForm';
-import ForgotForm from '../components/auth/ForgotForm';
-import ResetForm from '../components/auth/ResetForm';
 import Button from '../components/common/Button';
 import EmailVerificationModal from '../components/common/EmailVerificationModal';
 import { submitInquiry } from '../services/propertyService';
 import { useAuth } from '../hooks/useAuth';
+
+// Auth forms are only shown in modals — lazy-load them so they don't
+// inflate the initial bundle. react-hook-form + form logic stay out of
+// the critical path until a modal is actually opened.
+const LoginForm = lazy(() => import('../components/auth/LoginForm'));
+const RegisterForm = lazy(() => import('../components/auth/RegisterForm'));
+const ForgotForm = lazy(() => import('../components/auth/ForgotForm'));
+const ResetForm = lazy(() => import('../components/auth/ResetForm'));
+
+const AUTH_MODAL_FALLBACK = (
+  <div className="py-8 text-center text-slate-400 text-sm">Loading…</div>
+);
 
 const Home = () => {
   const navigate = useNavigate();
@@ -42,7 +50,7 @@ const Home = () => {
     }
   });
 
-  const handleBookVisit = (property) => {
+  const handleBookVisit = useCallback((property) => {
     if (!user) {
       showToast('Please log in to schedule and book a site visit.', 'info');
       setAuthModalState('login');
@@ -54,17 +62,17 @@ const Home = () => {
       return;
     }
     setModalType('visit');
-  };
+  }, [user, showToast]);
 
-  const handleViewDetails = (property) => {
+  const handleViewDetails = useCallback((property) => {
     setSelectedItem(property);
     setModalType('details');
-  };
+  }, []);
 
-  const handleExploreProject = (project) => {
+  const handleExploreProject = useCallback((project) => {
     setSelectedItem(project);
     setModalType('project');
-  };
+  }, []);
 
   const handleBookVisitConfirm = async (e) => {
     e.preventDefault();
@@ -170,20 +178,22 @@ const Home = () => {
       {/* Footer */}
       <Footer />
 
-      {/* Auth Modals */}
+      {/* Auth Modals — forms are lazy-loaded; Suspense provides fallback while chunk downloads */}
       <Modal
         isOpen={authModalState === 'login'}
         onClose={() => setAuthModalState(null)}
         title="Sign In to EstateXplorer"
       >
-        <LoginForm
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToRegister={(email) => {
-            if (email) setAuthModalEmail(email);
-            setAuthModalState('register');
-          }}
-          onSwitchToForgot={() => setAuthModalState('forgot')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <LoginForm
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToRegister={(email) => {
+              if (email) setAuthModalEmail(email);
+              setAuthModalState('register');
+            }}
+            onSwitchToForgot={() => setAuthModalState('forgot')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -192,11 +202,13 @@ const Home = () => {
         title="Join EstateXplorer"
         maxWidth="max-w-lg"
       >
-        <RegisterForm
-          initialEmail={authModalEmail}
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <RegisterForm
+            initialEmail={authModalEmail}
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -204,13 +216,15 @@ const Home = () => {
         onClose={() => setAuthModalState(null)}
         title="Forgot Password"
       >
-        <ForgotForm
-          onOtpSent={(email) => {
-            setResetEmail(email);
-            setAuthModalState('reset');
-          }}
-          onBackToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <ForgotForm
+            onOtpSent={(email) => {
+              setResetEmail(email);
+              setAuthModalState('reset');
+            }}
+            onBackToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -218,11 +232,13 @@ const Home = () => {
         onClose={() => setAuthModalState(null)}
         title="Reset Password"
       >
-        <ResetForm
-          email={resetEmail}
-          onSuccess={() => setAuthModalState(null)}
-          onBackToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <ResetForm
+            email={resetEmail}
+            onSuccess={() => setAuthModalState(null)}
+            onBackToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       {/* Book Visit Modal */}

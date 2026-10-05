@@ -62,6 +62,11 @@ const attributionSchema = new mongoose.Schema(
 // STRICT FIRST-TOUCH CONSTRAINT:
 // Only 1 active attribution record per (fingerprint, project)
 attributionSchema.index({ fingerprint: 1, project: 1 }, { unique: true });
+// Secondary guard: logged-in buyer cannot have 2 attributions for the same project (cross-device)
+attributionSchema.index(
+  { buyer: 1, project: 1 },
+  { unique: true, partialFilterExpression: { buyer: { $type: 'objectId' } } }
+);
 attributionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // Automatic cleanup after expiry
 
 module.exports = mongoose.model('Attribution', attributionSchema);

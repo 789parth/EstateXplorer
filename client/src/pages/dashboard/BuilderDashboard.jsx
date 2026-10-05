@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -51,8 +51,13 @@ import {
 } from '../../services/partnershipService';
 import { formatPhoneNumber, formatPrice } from '../../utils/formatters';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
-import AddPropertyModal from '../../components/dashboard/AddPropertyModal';
 import './BuilderDashboard.css';
+
+// Lazy-loaded heavy dashboard modals — keeps dashboard initial chunk lean and fast
+const AddPropertyModal = lazy(() => import('../../components/dashboard/AddPropertyModal'));
+const AddProjectUnitsModal = lazy(() => import('../../components/dashboard/AddProjectUnitsModal'));
+const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModal'));
+const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
 const BuilderDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
@@ -80,6 +85,9 @@ const BuilderDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editProperty, setEditProperty] = useState(null);
+  const [showKycModal, setShowKycModal] = useState(false);
+  const [unitsProject, setUnitsProject] = useState(null);
+  const [bookingLead, setBookingLead] = useState(null);
   const [projectSearch, setProjectSearch] = useState('');
   const [projectStatusFilter, setProjectStatusFilter] = useState('all');
   const [projectCategoryFilter, setProjectCategoryFilter] = useState('all');
@@ -116,6 +124,34 @@ const BuilderDashboard = () => {
   const [rejectionReasonText, setRejectionReasonText] = useState('');
   const [actionPartnershipId, setActionPartnershipId] = useState(null);
   const [copiedLinkMap, setCopiedLinkMap] = useState({});
+
+  const handleOpenAddProject = useCallback((propToEdit = null) => {
+    if (propToEdit) {
+      setEditProperty(propToEdit);
+      setIsModalOpen(true);
+      return;
+    }
+
+    // MANDATORY KYC CHECK: Builder must be verified by Admin before adding new project
+    const kycStatus = user?.kycVerification?.status || 'unverified';
+    if (kycStatus !== 'verified') {
+      if (kycStatus === 'pending') {
+        showToast('Your builder verification documents are under review by the Administrator.', 'info');
+      } else if (kycStatus === 'rejected') {
+        showToast(
+          `Document verification rejected: ${user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
+          'error'
+        );
+      } else {
+        showToast('Mandatory document verification required before adding projects. Please upload your documents.', 'warning');
+      }
+      setShowKycModal(true);
+      return;
+    }
+
+    setEditProperty(null);
+    setIsModalOpen(true);
+  }, [user, showToast]);
 
   const fetchProperties = useCallback(async (isBackground = false) => {
     try {
@@ -316,7 +352,7 @@ const BuilderDashboard = () => {
     try {
       setActionLoadingId(inquiryId);
       const res = await updateInquiryStatus(inquiryId, newStatus, {
-        lifecycleStage: newStatus,
+        lifecycleStage: newStatus === 'visit' ? 'site_visit_scheduled' : newStatus === 'closed' ? 'site_visit_done' : newStatus,
         ...extraData,
       });
       if (res.success) {
@@ -325,16 +361,16 @@ const BuilderDashboard = () => {
           prev.map((inq) =>
             inq._id === inquiryId
               ? {
-                  ...inq,
-                  ...(res.data || {}),
-                  property:
-                    res.data?.property && typeof res.data.property === 'object'
-                      ? res.data.property
-                      : inq.property,
-                  status: newStatus,
-                  lifecycleStage: newStatus,
-                  ...extraData,
-                }
+                ...inq,
+                ...(res.data || {}),
+                property:
+                  res.data?.property && typeof res.data.property === 'object'
+                    ? res.data.property
+                    : inq.property,
+                status: newStatus,
+                lifecycleStage: res.data?.lifecycleStage || (newStatus === 'visit' ? 'site_visit_scheduled' : newStatus === 'closed' ? 'site_visit_done' : newStatus),
+                ...extraData,
+              }
               : inq
           )
         );
@@ -342,8 +378,8 @@ const BuilderDashboard = () => {
           newStatus === 'closed'
             ? 'Site visit confirmed and marked completed!'
             : newStatus === 'visit'
-            ? 'Site visit updated and scheduled!'
-            : `Lead status updated to ${newStatus}`,
+              ? 'Site visit updated and scheduled!'
+              : `Lead status updated to ${newStatus}`,
           'success'
         );
       }
@@ -606,11 +642,11 @@ const BuilderDashboard = () => {
 
   const initials = user?.name
     ? user.name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .substring(0, 2)
-        .toUpperCase()
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .substring(0, 2)
+      .toUpperCase()
     : 'BL';
 
   const companyName = user?.builderProfile?.companyName || user?.name || 'Builder Partner';
@@ -638,9 +674,8 @@ const BuilderDashboard = () => {
             <div className="nav-section-label">Management</div>
             <button
               onClick={() => handleTabChange('overview')}
-              className={`nav-item w-full text-left flex items-center gap-2 ${
-                activeTab === 'overview' ? 'active' : ''
-              }`}
+              className={`nav-item w-full text-left flex items-center gap-2 ${activeTab === 'overview' ? 'active' : ''
+                }`}
             >
               <LayoutDashboard size={18} />
               <span>Dashboard</span>
@@ -648,9 +683,8 @@ const BuilderDashboard = () => {
 
             <button
               onClick={() => handleTabChange('projects')}
-              className={`nav-item w-full text-left flex items-center justify-between ${
-                activeTab === 'projects' ? 'active' : ''
-              }`}
+              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'projects' ? 'active' : ''
+                }`}
             >
               <span className="flex items-center gap-2">
                 <Building2 size={18} />
@@ -663,9 +697,8 @@ const BuilderDashboard = () => {
 
             <button
               onClick={() => handleTabChange('leads')}
-              className={`nav-item w-full text-left flex items-center justify-between ${
-                activeTab === 'leads' ? 'active' : ''
-              }`}
+              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'leads' ? 'active' : ''
+                }`}
             >
               <span className="flex items-center gap-2">
                 <MessageSquare size={18} />
@@ -678,9 +711,8 @@ const BuilderDashboard = () => {
 
             <button
               onClick={() => handleTabChange('visits')}
-              className={`nav-item w-full text-left flex items-center justify-between ${
-                activeTab === 'visits' ? 'active' : ''
-              }`}
+              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'visits' ? 'active' : ''
+                }`}
             >
               <span className="flex items-center gap-2">
                 <Calendar size={18} />
@@ -693,9 +725,8 @@ const BuilderDashboard = () => {
 
             <button
               onClick={() => handleTabChange('requests')}
-              className={`nav-item w-full text-left flex items-center justify-between ${
-                activeTab === 'requests' ? 'active' : ''
-              }`}
+              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'requests' ? 'active' : ''
+                }`}
             >
               <span className="flex items-center gap-2">
                 <Users size={18} />
@@ -715,11 +746,19 @@ const BuilderDashboard = () => {
               <ShieldCheck size={18} />
               <span>Profile</span>
             </Link>
+            <Link className="nav-item" to="/">
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" /></svg>
+              Homepage
+            </Link>
+            <Link className="nav-item" to="/listings">
+              <Eye size={18} />
+              Browse Market
+            </Link>
             <button
               className="nav-item w-full text-left bg-transparent border-0 cursor-pointer flex items-center gap-2"
               onClick={logout}
             >
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
               <span>Sign Out</span>
             </button>
           </div>
@@ -752,10 +791,7 @@ const BuilderDashboard = () => {
           <div className="topbar-right flex items-center gap-3">
             <button
               className="btn btn-primary inline-flex items-center gap-2 shadow-sm"
-              onClick={() => {
-                setEditProperty(null);
-                setIsModalOpen(true);
-              }}
+              onClick={() => handleOpenAddProject(null)}
             >
               <Plus size={16} /> Add New Project
             </button>
@@ -864,9 +900,8 @@ const BuilderDashboard = () => {
                             return (
                               <div
                                 key={lead._id}
-                                className={`py-2.5 px-2 rounded-lg transition-colors ${
-                                  isSelected ? 'bg-blue-50/50' : isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50/70'
-                                }`}
+                                className={`py-2.5 px-2 rounded-lg transition-colors ${isSelected ? 'bg-blue-50/50' : isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50/70'
+                                  }`}
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   {/* Left: Checkbox + Avatar + Buyer & Project Info */}
@@ -1056,11 +1091,10 @@ const BuilderDashboard = () => {
                                 className="w-full h-full object-cover"
                               />
                               <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${
-                                  (project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
-                                    ? 'bg-purple-700 text-white'
-                                    : 'bg-blue-600 text-white'
-                                }`}>
+                                <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
+                                  ? 'bg-purple-700 text-white'
+                                  : 'bg-blue-600 text-white'
+                                  }`}>
                                   {(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount) ? 'Project' : 'Property'}
                                 </span>
                               </div>
@@ -1086,6 +1120,15 @@ const BuilderDashboard = () => {
                               <ExternalLink size={12} /> View on Site
                             </Link>
                             <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setUnitsProject(project)}
+                                className="p-1.5 text-emerald-700 hover:bg-emerald-100 rounded-md transition-colors"
+                                title="Manage project inventory units"
+                                disabled={project.category !== 'project'}
+                              >
+                                <Building2 size={14} />
+                              </button>
                               <button
                                 onClick={() => {
                                   setEditProperty(project);
@@ -1160,10 +1203,7 @@ const BuilderDashboard = () => {
                   </select>
 
                   <button
-                    onClick={() => {
-                      setEditProperty(null);
-                      setIsModalOpen(true);
-                    }}
+                    onClick={() => handleOpenAddProject(null)}
                     className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
                   >
                     <Plus size={14} /> Add Project
@@ -1197,11 +1237,10 @@ const BuilderDashboard = () => {
                               className="w-full h-full object-cover"
                             />
                             <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap">
-                              <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${
-                                (project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
-                                  ? 'bg-purple-700 text-white'
-                                  : 'bg-blue-600 text-white'
-                              }`}>
+                              <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
+                                ? 'bg-purple-700 text-white'
+                                : 'bg-blue-600 text-white'
+                                }`}>
                                 {(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount) ? 'Project' : 'Property'}
                               </span>
                               {project.rera && (
@@ -1248,11 +1287,10 @@ const BuilderDashboard = () => {
                               <button
                                 type="button"
                                 onClick={() => handleToggleAcquisition(project)}
-                                className={`text-[11px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
-                                  project.allowAgentAcquisition || project.networkEnabled
-                                    ? 'border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50'
-                                    : 'border-slate-300 text-slate-700 bg-white hover:bg-slate-100'
-                                }`}
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${project.allowAgentAcquisition || project.networkEnabled
+                                  ? 'border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50'
+                                  : 'border-slate-300 text-slate-700 bg-white hover:bg-slate-100'
+                                  }`}
                                 title={project.allowAgentAcquisition || project.networkEnabled ? 'Click to disable agent acquisition' : 'Click to allow agents to acquire this project'}
                               >
                                 {project.allowAgentAcquisition || project.networkEnabled ? 'Disable' : 'Enable'}
@@ -1338,22 +1376,20 @@ const BuilderDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    leadSourceFilter === 'all'
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${leadSourceFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
                 >
                   All Inquiries ({propertyInquiries.length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('agent')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    leadSourceFilter === 'agent'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${leadSourceFilter === 'agent'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'
+                    }`}
                 >
                   <Users size={13} />
                   <span>Agent-Generated Leads ({agentInquiriesCount})</span>
@@ -1361,11 +1397,10 @@ const BuilderDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('direct')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    leadSourceFilter === 'direct'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${leadSourceFilter === 'direct'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                    }`}
                 >
                   <Globe size={13} />
                   <span>Direct Website Leads ({directInquiriesCount})</span>
@@ -1383,8 +1418,8 @@ const BuilderDashboard = () => {
                       {leadSourceFilter === 'agent'
                         ? 'No agent-affiliated inquiries recorded yet.'
                         : leadSourceFilter === 'direct'
-                        ? 'No direct website inquiries recorded yet.'
-                        : 'No inquiries have been received yet.'}
+                          ? 'No direct website inquiries recorded yet.'
+                          : 'No inquiries have been received yet.'}
                     </p>
                   </div>
                 ) : (
@@ -1448,9 +1483,8 @@ const BuilderDashboard = () => {
                             return (
                               <tr
                                 key={lead._id}
-                                className={`transition-colors ${
-                                  isSelected ? 'bg-blue-50/40' : 'hover:bg-slate-50/70'
-                                }`}
+                                className={`transition-colors ${isSelected ? 'bg-blue-50/40' : 'hover:bg-slate-50/70'
+                                  }`}
                               >
                                 <td className="py-3 px-3">
                                   <input
@@ -1507,17 +1541,16 @@ const BuilderDashboard = () => {
                                 {/* Column 4: Lead Status */}
                                 <td className="py-3 px-3 whitespace-nowrap">
                                   <span
-                                    className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold inline-flex items-center gap-1 ${
-                                      lead.status === 'closed'
-                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                        : lead.status === 'contacted'
+                                    className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold inline-flex items-center gap-1 ${lead.status === 'closed'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : lead.status === 'contacted'
                                         ? 'bg-blue-100 text-blue-800 border border-blue-200'
                                         : lead.status === 'visit'
-                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                        : lead.status === 'rejected'
-                                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                        : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                    }`}
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                          : lead.status === 'rejected'
+                                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      }`}
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
                                     {lead.status === 'visit' ? 'Site Visit' : lead.status ? lead.status.charAt(0).toUpperCase() + lead.status.slice(1) : 'New'}
@@ -1585,6 +1618,15 @@ const BuilderDashboard = () => {
                                         <span className="whitespace-nowrap">Reply</span>
                                       </button>
                                     )}
+                                    {lead.property?.category === 'project' && !lead.bookingRef && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setBookingLead(lead)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors"
+                                      >
+                                        Book unit
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       title="Delete Inquiry"
@@ -1624,22 +1666,20 @@ const BuilderDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    leadSourceFilter === 'all'
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${leadSourceFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
                 >
                   All Visits ({siteVisitsList.length})
                 </button>
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('agent')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    leadSourceFilter === 'agent'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${leadSourceFilter === 'agent'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-white border border-blue-200 text-blue-700 hover:bg-blue-50'
+                    }`}
                 >
                   <Users size={13} />
                   <span>Agent-Generated Visits ({agentVisitsCount})</span>
@@ -1647,11 +1687,10 @@ const BuilderDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setLeadSourceFilter('direct')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    leadSourceFilter === 'direct'
-                      ? 'bg-emerald-600 text-white shadow-xs'
-                      : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${leadSourceFilter === 'direct'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                    }`}
                 >
                   <Globe size={13} />
                   <span>Direct Site Visits ({directVisitsCount})</span>
@@ -1667,8 +1706,8 @@ const BuilderDashboard = () => {
                       {leadSourceFilter === 'agent'
                         ? 'No agent-affiliated site visits recorded yet.'
                         : leadSourceFilter === 'direct'
-                        ? 'No direct website site visits recorded yet.'
-                        : 'When buyers book site visits from project pages, they will appear here for confirmation.'}
+                          ? 'No direct website site visits recorded yet.'
+                          : 'When buyers book site visits from project pages, they will appear here for confirmation.'}
                     </p>
                   </div>
                 ) : (
@@ -1685,16 +1724,14 @@ const BuilderDashboard = () => {
                       return (
                         <div
                           key={visit._id}
-                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${
-                            isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
-                          }`}
+                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
+                            }`}
                         >
                           <div>
                             <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
                               <span
-                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${
-                                  isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                }`}
+                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}
                               >
                                 <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
                               </span>
@@ -1904,11 +1941,10 @@ const BuilderDashboard = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 <div
                   onClick={() => setPartnershipStatusFilter('all')}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                    partnershipStatusFilter === 'all'
-                      ? 'bg-blue-50/80 border-blue-300 shadow-xs'
-                      : 'bg-white border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${partnershipStatusFilter === 'all'
+                    ? 'bg-blue-50/80 border-blue-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                 >
                   <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Requests</div>
                   <div className="text-xl font-black text-slate-900 mt-1">{partnerships.length}</div>
@@ -1916,11 +1952,10 @@ const BuilderDashboard = () => {
 
                 <div
                   onClick={() => setPartnershipStatusFilter('pending')}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                    partnershipStatusFilter === 'pending'
-                      ? 'bg-amber-50/90 border-amber-300 shadow-xs'
-                      : 'bg-white border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${partnershipStatusFilter === 'pending'
+                    ? 'bg-amber-50/90 border-amber-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                 >
                   <div className="text-[11px] font-bold text-amber-700 uppercase tracking-wider flex items-center gap-1">
                     <Clock size={12} /> Pending Review
@@ -1930,11 +1965,10 @@ const BuilderDashboard = () => {
 
                 <div
                   onClick={() => setPartnershipStatusFilter('accepted')}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                    partnershipStatusFilter === 'accepted'
-                      ? 'bg-emerald-50/90 border-emerald-300 shadow-xs'
-                      : 'bg-white border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${partnershipStatusFilter === 'accepted'
+                    ? 'bg-emerald-50/90 border-emerald-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                 >
                   <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1">
                     <Award size={12} /> Affiliated Agents
@@ -1944,11 +1978,10 @@ const BuilderDashboard = () => {
 
                 <div
                   onClick={() => setPartnershipStatusFilter('rejected')}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                    partnershipStatusFilter === 'rejected'
-                      ? 'bg-rose-50/90 border-rose-300 shadow-xs'
-                      : 'bg-white border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${partnershipStatusFilter === 'rejected'
+                    ? 'bg-rose-50/90 border-rose-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                 >
                   <div className="text-[11px] font-bold text-rose-700 uppercase tracking-wider flex items-center gap-1">
                     <X size={12} /> Rejected
@@ -2081,11 +2114,10 @@ const BuilderDashboard = () => {
                                     <button
                                       type="button"
                                       onClick={() => handleCopyLink(affiliateCode, affiliateUrl, req._id)}
-                                      className={`shrink-0 p-1.5 rounded border transition-all cursor-pointer ${
-                                        copiedLinkMap[req._id]
-                                          ? 'bg-emerald-600 text-white border-emerald-600'
-                                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                      }`}
+                                      className={`shrink-0 p-1.5 rounded border transition-all cursor-pointer ${copiedLinkMap[req._id]
+                                        ? 'bg-emerald-600 text-white border-emerald-600'
+                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                                        }`}
                                       title="Copy unique agent referral link"
                                     >
                                       {copiedLinkMap[req._id] ? <Check size={12} /> : <Copy size={12} />}
@@ -2347,20 +2379,68 @@ const BuilderDashboard = () => {
       )}
 
       {/* Add / Edit Project Modal */}
-      <AddPropertyModal
-        isOpen={isModalOpen}
-        initialData={editProperty}
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-        }}
-        onSuccess={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-          broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
-          fetchProperties();
-        }}
-      />
+      {isModalOpen && (
+        <Suspense fallback={null}>
+          <AddPropertyModal
+            isOpen={isModalOpen}
+            initialData={editProperty}
+            onClose={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+            }}
+            onSuccess={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+              broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
+              fetchProperties();
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Mandatory KYC Verification Modal for Builder */}
+      {showKycModal && (
+        <Suspense fallback={null}>
+          <KycVerificationModal
+            isOpen={showKycModal}
+            onClose={() => setShowKycModal(false)}
+            user={user}
+            showToast={showToast}
+            onVerificationSubmitted={(kycData) => {
+              if (user) {
+                user.kycVerification = kycData;
+              }
+            }}
+          />
+        </Suspense>
+      )}
+      {unitsProject && (
+        <Suspense fallback={null}>
+          <AddProjectUnitsModal
+            isOpen={!!unitsProject}
+            project={unitsProject}
+            showToast={showToast}
+            onClose={() => setUnitsProject(null)}
+            onSuccess={() => setUnitsProject(null)}
+          />
+        </Suspense>
+      )}
+      {bookingLead && (
+        <Suspense fallback={null}>
+          <BookUnitModal
+            isOpen={!!bookingLead}
+            lead={bookingLead}
+            showToast={showToast}
+            onClose={() => setBookingLead(null)}
+            onSuccess={() => {
+              setInquiries((items) => items.map((item) => item._id === bookingLead?._id
+                ? { ...item, lifecycleStage: 'unit_booked', bookingRef: true }
+                : item));
+              setBookingLead(null);
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* ── 1. View Agent Profile Modal (Spec §5) ── */}
       {selectedAgentModal && (
@@ -2518,11 +2598,10 @@ const BuilderDashboard = () => {
 
               <div className="overflow-y-auto pr-1 space-y-4 flex-1">
                 {/* Acquisition Setting Toggle Banner */}
-                <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${
-                  isAcquisitionEnabled
-                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
-                    : 'bg-slate-50 border-slate-200 text-slate-700'
-                }`}>
+                <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${isAcquisitionEnabled
+                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                  : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}>
                   <div>
                     <div className="font-bold text-xs flex items-center gap-1.5">
                       <span className={`w-2.5 h-2.5 rounded-full ${isAcquisitionEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
@@ -2537,11 +2616,10 @@ const BuilderDashboard = () => {
                   <button
                     type="button"
                     onClick={() => handleToggleAcquisition(projectAgentModal)}
-                    className={`shrink-0 py-2 px-3.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
-                      isAcquisitionEnabled
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
-                        : 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
-                    }`}
+                    className={`shrink-0 py-2 px-3.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${isAcquisitionEnabled
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                      : 'bg-slate-800 hover:bg-slate-900 text-white shadow-xs'
+                      }`}
                   >
                     {isAcquisitionEnabled ? 'Enabled (Click to Disable)' : 'Disabled (Click to Enable)'}
                   </button>

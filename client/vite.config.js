@@ -23,12 +23,13 @@ export default defineConfig({
   build: {
     target: 'esnext',
     cssCodeSplit: true,
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-ui': ['lucide-react', 'framer-motion'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-motion': ['framer-motion'],
         },
       },
     },

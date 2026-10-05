@@ -210,14 +210,17 @@ const EmiCalculator = ({ property }) => {
   // Interest stroke dash length
   const interestStrokeLength = (interestRatio / 100) * circumference;
 
+  const isProject = property?.category === 'project' || Boolean(property?.isProject);
+  const emiHeading = isProject ? 'Project Loan EMI Estimate' : 'Property Loan EMI Estimate';
+
   return (
     <section
       id="emi-calculator"
       className="pd-card p-6 sm:p-8 bg-white border border-slate-200/90 rounded-2xl shadow-xs text-left mb-6"
     >
-      {/* ── Title matching Image 2 ── */}
+      {/* ── Title based on Project vs Property ── */}
       <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mb-8">
-        Home Loan EMI Estimate
+        {emiHeading}
       </h2>
 
       {/* ── 2-Column Responsive Layout ── */}
@@ -497,4 +500,4 @@ const EmiCalculator = ({ property }) => {
   );
 };
 
-export default EmiCalculator;
+export default React.memo(EmiCalculator);

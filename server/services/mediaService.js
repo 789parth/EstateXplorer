@@ -70,7 +70,7 @@ const streamFileFromGridFS = async (req, res, idOrFilename) => {
       ? { $or: [{ _id: new mongoose.Types.ObjectId(cleanIdOrFilename) }, { filename: cleanIdOrFilename }, { filename: baseTarget }] }
       : { $or: [{ filename: cleanIdOrFilename }, { filename: baseTarget }, { 'metadata.originalName': baseTarget }] };
 
-    const files = await bucket.find(query).toArray();
+    const files = await bucket.find(query).limit(1).toArray();
 
     if (!files || files.length === 0) {
       return res.status(404).json({

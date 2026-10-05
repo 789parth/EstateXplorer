@@ -274,7 +274,13 @@ async function runInquiryBookingSecuritySuite() {
     const origInqUpdateMany = Inquiry.updateMany;
     const origInqFindOne = Inquiry.findOne;
 
-    Property.findById = async () => null;
+    Property.findById = async () => ({
+      _id: '60c72b2f9b1d8b2bad000001',
+      title: 'Luxury Skyline Villa',
+      isActive: true,
+      builder: '60c72b2f9b1d8b2bad000099',
+      save: async () => {},
+    });
     Inquiry.create = async (doc) => ({ ...doc, _id: 'mock_inquiry_id' });
     Inquiry.updateMany = async () => ({ modifiedCount: 0 });
     const mockFindOne = (retVal = null) => {

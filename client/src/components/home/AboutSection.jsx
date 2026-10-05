@@ -109,4 +109,5 @@ const AboutSection = () => {
   );
 };
 
-export default AboutSection;
+export default React.memo(AboutSection);
+

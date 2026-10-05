@@ -1,6 +1,8 @@
 const crypto = require('crypto');
+const mongoose = require('mongoose');
 const Attribution = require('../models/Attribution');
 const Partnership = require('../models/Partnership');
+const User = require('../models/User');
 const { ATTRIBUTION_WINDOW_MS } = require('../config/attribution');
 
 /**
@@ -9,7 +11,9 @@ const { ATTRIBUTION_WINDOW_MS } = require('../config/attribution');
  * @returns {string} 64-char hex hash
  */
 function computeFingerprint(req) {
-  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+  // Express derives req.ip according to the configured trusted proxy chain.
+  // Never trust the raw X-Forwarded-For value supplied by a caller.
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown-client';
   const userAgent = req.headers['user-agent'] || 'unknown-device';
   return crypto.createHash('sha256').update(`${ip}::${userAgent}`).digest('hex');
 }
@@ -45,6 +49,14 @@ async function resolveAttribution(req, projectId, candidateAgentCode = null, buy
   });
 
   if (existingAttribution) {
+    const activePartnership = await Partnership.exists({
+      agent: existingAttribution.agent,
+      project: projectId,
+      status: { $in: ['approved', 'accepted'] },
+    });
+    if (!activePartnership) {
+      return { agent: null, agentCode: null, isAttributed: false, expiresAt: null };
+    }
     // Increment visit/touch count for metrics
     existingAttribution.clicksCount = (existingAttribution.clicksCount || 1) + 1;
     if (buyerId && !existingAttribution.buyer) {
@@ -74,14 +86,23 @@ async function resolveAttribution(req, projectId, candidateAgentCode = null, buy
   }
 
   // 3. Verify partnership approval
-  const trimmedCode = String(codeToVerify).trim();
-  const mongoose = require('mongoose');
+  const trimmedCode = String(codeToVerify).trim().slice(0, 64);
+  const upperCode = trimmedCode.toUpperCase();
 
+  // Try exact uppercase match first to use sparse unique index without regex scan
   let partnership = await Partnership.findOne({
-    agentCode: { $regex: new RegExp(`^${trimmedCode}$`, 'i') },
+    agentCode: upperCode,
     project: projectId,
     status: { $in: ['approved', 'accepted'] },
   });
+
+  if (!partnership) {
+    partnership = await Partnership.findOne({
+      agentCode: { $regex: new RegExp(`^${trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      project: projectId,
+      status: { $in: ['approved', 'accepted'] },
+    });
+  }
 
   if (!partnership && mongoose.Types.ObjectId.isValid(trimmedCode)) {
     partnership = await Partnership.findOne({
@@ -92,10 +113,10 @@ async function resolveAttribution(req, projectId, candidateAgentCode = null, buy
   }
 
   if (!partnership) {
-    const User = require('../models/User');
     const agentUser = await User.findOne({
       $or: [
-        { agentCode: { $regex: new RegExp(`^${trimmedCode}$`, 'i') } },
+        { agentCode: upperCode },
+        { agentCode: { $regex: new RegExp(`^${trimmedCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
         ...(mongoose.Types.ObjectId.isValid(trimmedCode) ? [{ _id: trimmedCode }] : []),
       ],
       role: 'agent',
@@ -135,10 +156,10 @@ async function resolveAttribution(req, projectId, candidateAgentCode = null, buy
       clicksCount: 1,
     });
 
-    // Increment partnership metrics
-    await Partnership.findByIdAndUpdate(partnership._id, {
+    // Increment partnership metrics asynchronously (non-blocking)
+    Partnership.findByIdAndUpdate(partnership._id, {
       $inc: { 'metrics.totalClicks': 1 }
-    });
+    }).catch(() => {});
 
     return {
       agent: newAttribution.agent,

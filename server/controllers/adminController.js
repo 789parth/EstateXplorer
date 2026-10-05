@@ -4,6 +4,7 @@ const AppError = require('../utils/AppError');
 const sendEmail = require('../utils/sendEmail');
 const { normalizeEmail } = require('../services/disposableEmailService');
 const { memoryCache } = require('../utils/cache');
+const { cascadeDeleteAllUserData } = require('../services/cascadeDeleteService');
 
 // Helper to format role names
 const formatRoleTitle = (role) => {
@@ -23,15 +24,27 @@ exports.getRoleRequests = async (req, res, next) => {
       filter.status = status.toUpperCase();
     }
 
-    const requests = await RoleRequest.find(filter)
-      .populate('userId', 'name email phone city role roles createdAt')
-      .populate('reviewedBy', 'name email')
-      .sort({ requestedAt: -1 })
-      .lean();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const skip = (page - 1) * limit;
+
+    const [total, requests] = await Promise.all([
+      RoleRequest.countDocuments(filter),
+      RoleRequest.find(filter)
+        .populate('userId', 'name email phone city role roles createdAt')
+        .populate('reviewedBy', 'name email')
+        .sort({ requestedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
 
     res.status(200).json({
       success: true,
       count: requests.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
       data: requests,
     });
   } catch (error) {
@@ -46,6 +59,7 @@ exports.approveRoleRequest = async (req, res, next) => {
   try {
     const { id } = req.params;
 
+    // Fetch request first — we need its userId to fetch the user in parallel only if request exists
     const request = await RoleRequest.findById(id);
     if (!request) {
       return next(new AppError('Role request not found', 404));
@@ -382,14 +396,26 @@ exports.getUsers = async (req, res, next) => {
       ];
     }
 
-    const users = await User.find(filter)
-      .select('name email phone city role roles createdAt isVerified isBlocked blockedReason authProvider')
-      .sort({ createdAt: -1 })
-      .lean();
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const skip = (page - 1) * limit;
+
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter)
+        .select('name email phone city role roles createdAt isVerified isBlocked blockedReason authProvider')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+    ]);
 
     res.status(200).json({
       success: true,
       count: users.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
       data: users,
     });
   } catch (error) {
@@ -418,7 +444,6 @@ exports.deleteUser = async (req, res, next) => {
     }
 
     // Cascade delete user and all associated data by ID and email
-    const { cascadeDeleteAllUserData } = require('../services/cascadeDeleteService');
     await cascadeDeleteAllUserData({ userId: targetUser._id, email: targetUser.email });
 
     res.status(200).json({
@@ -475,4 +500,134 @@ exports.toggleBlockUser = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Get all pending or filtered KYC document verification submissions
+// @route   GET /api/admin/kyc-requests
+// @access  Private / Admin
+exports.getKycRequests = async (req, res, next) => {
+  try {
+    const { status, role } = req.query;
+    const query = {};
+
+    if (status && ['unverified', 'pending', 'verified', 'rejected'].includes(status)) {
+      query['kycVerification.status'] = status;
+    } else {
+      // By default list pending or all non-unverified submissions
+      query['kycVerification.status'] = { $in: ['pending', 'verified', 'rejected'] };
+    }
+
+    if (role && ['builder', 'agent', 'owner'].includes(role)) {
+      query.role = role;
+    }
+
+    const users = await User.find(query)
+      .select('name email phone role kycVerification createdAt builderProfile agentProfile ownerProfile')
+      .sort({ 'kycVerification.submittedAt': -1, createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      data: users,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Approve user's submitted KYC documents
+// @route   PATCH /api/admin/kyc-requests/:userId/approve
+// @access  Private / Admin
+exports.approveKycRequest = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const targetUser = await User.findById(userId);
+
+    if (!targetUser) {
+      return next(new AppError('User not found', 404));
+    }
+
+    if (!targetUser.kycVerification || !targetUser.kycVerification.status) {
+      return next(new AppError('User has not submitted KYC documents yet', 400));
+    }
+
+    targetUser.kycVerification.status = 'verified';
+    targetUser.kycVerification.reviewedAt = new Date();
+    targetUser.kycVerification.reviewedBy = req.user.id;
+    targetUser.kycVerification.rejectionReason = '';
+
+    if (targetUser.kycVerification.aadharCard?.url) {
+      targetUser.kycVerification.aadharCard.status = 'verified';
+    }
+    if (targetUser.kycVerification.panCard?.url) {
+      targetUser.kycVerification.panCard.status = 'verified';
+    }
+    if (targetUser.kycVerification.companyDoc?.url) {
+      targetUser.kycVerification.companyDoc.status = 'verified';
+    }
+    if (targetUser.kycVerification.agencyDoc?.url) {
+      targetUser.kycVerification.agencyDoc.status = 'verified';
+    }
+
+    await targetUser.save();
+
+    res.status(200).json({
+      success: true,
+      message: `KYC documents for ${targetUser.name} (${targetUser.email}) approved successfully. User can now post properties.`,
+      data: targetUser.kycVerification,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Reject user's submitted KYC documents with reason
+// @route   PATCH /api/admin/kyc-requests/:userId/reject
+// @access  Private / Admin
+exports.rejectKycRequest = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { rejectionReason } = req.body;
+
+    const targetUser = await User.findById(userId);
+    if (!targetUser) {
+      return next(new AppError('User not found', 404));
+    }
+
+    if (!targetUser.kycVerification) {
+      return next(new AppError('User has no KYC document record', 400));
+    }
+
+    const reason = rejectionReason?.trim() || 'Uploaded documents did not meet verification criteria. Please re-upload clear copies.';
+
+    targetUser.kycVerification.status = 'rejected';
+    targetUser.kycVerification.reviewedAt = new Date();
+    targetUser.kycVerification.reviewedBy = req.user.id;
+    targetUser.kycVerification.rejectionReason = reason;
+
+    if (targetUser.kycVerification.aadharCard?.url) {
+      targetUser.kycVerification.aadharCard.status = 'rejected';
+    }
+    if (targetUser.kycVerification.panCard?.url) {
+      targetUser.kycVerification.panCard.status = 'rejected';
+    }
+    if (targetUser.kycVerification.companyDoc?.url) {
+      targetUser.kycVerification.companyDoc.status = 'rejected';
+    }
+    if (targetUser.kycVerification.agencyDoc?.url) {
+      targetUser.kycVerification.agencyDoc.status = 'rejected';
+    }
+
+    await targetUser.save();
+
+    res.status(200).json({
+      success: true,
+      message: `KYC documents for ${targetUser.name} (${targetUser.email}) have been rejected.`,
+      data: targetUser.kycVerification,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 

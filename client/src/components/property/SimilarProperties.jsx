@@ -326,4 +326,5 @@ const SimilarProperties = ({ currentProperty }) => {
   );
 };
 
-export default SimilarProperties;
+export default React.memo(SimilarProperties);
+

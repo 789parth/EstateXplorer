@@ -64,7 +64,7 @@ const userSchema = new mongoose.Schema(
     roles: {
       type: [String],
       enum: ['buyer', 'owner', 'builder', 'agent', 'admin'],
-      default: ['buyer'],
+      default: ['buyer', 'builder', 'agent', 'owner'],
     },
     avatar: {
       type: String,
@@ -157,14 +157,51 @@ const userSchema = new mongoose.Schema(
       city: { type: String, default: '' },
       preferredContactTime: { type: String, default: 'Anytime' },
     },
+    kycVerification: {
+      status: {
+        type: String,
+        enum: ['unverified', 'pending', 'verified', 'rejected'],
+        default: 'unverified',
+        index: true,
+      },
+      submittedAt: { type: Date },
+      reviewedAt: { type: Date },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      rejectionReason: { type: String, default: '' },
+      roleAtSubmission: { type: String, enum: ['builder', 'agent', 'owner'], default: 'builder' },
+      aadharCard: {
+        number: { type: String, default: '' },
+        url: { type: String, default: '' },
+        name: { type: String, default: '' },
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
+      },
+      panCard: {
+        number: { type: String, default: '' },
+        url: { type: String, default: '' },
+        name: { type: String, default: '' },
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
+      },
+      companyDoc: {
+        number: { type: String, default: '' },
+        url: { type: String, default: '' },
+        name: { type: String, default: '' },
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
+      },
+      agencyDoc: {
+        number: { type: String, default: '' },
+        url: { type: String, default: '' },
+        name: { type: String, default: '' },
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
+      },
+    },
   },
   { timestamps: true }
 );
 
-// Ensure roles array contains at least ['buyer'] by default
+// Ensure roles array contains standard portal roles by default
 userSchema.pre('save', async function (next) {
   if (!this.roles || !Array.isArray(this.roles) || this.roles.length === 0) {
-    this.roles = ['buyer'];
+    this.roles = ['buyer', 'builder', 'agent', 'owner'];
   }
 
   if (!this.isModified('password') || !this.password) {
@@ -182,7 +219,15 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 
 // Query indexes
 userSchema.index({ role: 1 });
+userSchema.index({ roles: 1 });
 userSchema.index({ isBlocked: 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { phone: { $type: 'string', $gt: '' } },
+  }
+);
 
 module.exports = mongoose.model('User', userSchema);

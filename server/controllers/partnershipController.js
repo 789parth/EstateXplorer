@@ -3,15 +3,14 @@ const Property = require('../models/Property');
 const Partnership = require('../models/Partnership');
 
 /**
- * @desc   Discover Master Projects available for Channel Partner selling rights
+ * @desc   Discover Projects and Properties available for Channel Partner selling rights
  * @route  GET /api/partnerships/discover
  * @access Private (Agent only)
  */
 exports.discoverProjects = async (req, res) => {
   try {
-    const { city, search } = req.query;
+    const { city, search, category } = req.query;
     const query = {
-      category: 'project',
       isActive: true,
       $or: [
         { allowAgentAcquisition: true },
@@ -19,19 +18,34 @@ exports.discoverProjects = async (req, res) => {
       ],
     };
 
-    if (city) {
+    if (category && category !== 'all') {
+      query.category = category;
+    }
+
+    if (city && city !== 'all') {
       query['location.city'] = new RegExp(city, 'i');
     }
     if (search) {
       query.title = new RegExp(search, 'i');
     }
 
-    const projects = await Property.find(query)
-      .populate('builder', 'name companyName phone email reraNumber builderProfile')
-      .sort({ isFeatured: -1, createdAt: -1 });
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
 
-    // Fetch agent's current partnership statuses to display application state on cards
-    const myPartnerships = await Partnership.find({ agent: req.user._id });
+    // Parallelize count, property fetch, and agent partnership status in one round-trip
+    const [total, projects, myPartnerships] = await Promise.all([
+      Property.countDocuments(query),
+      Property.find(query)
+        .populate('builder', 'name companyName role reraNumber')
+        .sort({ isFeatured: -1, createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Partnership.find({ agent: req.user._id })
+        .select('project status agentCode commissionRate')
+        .lean(),
+    ]);
+
     const partnershipMap = {};
     myPartnerships.forEach((p) => {
       partnershipMap[p.project.toString()] = {
@@ -43,7 +57,8 @@ exports.discoverProjects = async (req, res) => {
     });
 
     const results = projects.map((p) => ({
-      ...p.toObject(),
+      ...p,
+      user: p.builder,
       partnershipStatus: partnershipMap[p._id.toString()]?.status || 'unapplied',
       partnershipDetails: partnershipMap[p._id.toString()] || null,
     }));
@@ -51,6 +66,9 @@ exports.discoverProjects = async (req, res) => {
     res.status(200).json({
       success: true,
       count: results.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
       data: results,
     });
   } catch (err) {
@@ -128,12 +146,13 @@ exports.getBuilderPartnerships = async (req, res) => {
  */
 exports.updatePartnershipStatus = async (req, res) => {
   try {
-    const { status, commissionRate } = req.body;
+    const { status, commissionRate, rejectionReason } = req.body;
     const partnership = await partnershipService.updatePartnershipStatus(
       req.user._id,
       req.params.id,
       status,
-      commissionRate
+      commissionRate,
+      rejectionReason
     );
 
     res.status(200).json({
@@ -175,7 +194,9 @@ exports.getProjectPartnership = async (req, res) => {
     const partnership = await Partnership.findOne({
       agent: req.user._id,
       project: req.params.projectId,
-    }).populate('project', 'title allowAgentAcquisition networkEnabled builder');
+    })
+      .populate('project', 'title allowAgentAcquisition networkEnabled builder')
+      .lean();
 
     res.status(200).json({
       success: true,

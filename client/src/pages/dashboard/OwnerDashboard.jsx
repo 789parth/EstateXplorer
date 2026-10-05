@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -22,28 +22,44 @@ import {
   Search,
   Filter,
   X,
+  Award,
+  ShieldCheck,
+  Copy,
+  AlertCircle,
+  Compass,
+  Handshake,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { useSocket, SOCKET_EVENTS } from '../../hooks/useSocket';
 import {
   getMyProperties,
   deleteProperty,
+  updateProperty,
   getMyInquiries,
   updateInquiryStatus,
   deleteInquiryApi,
   bulkDeleteInquiriesApi,
   replyToInquiryApi,
 } from '../../services/propertyService';
+import {
+  getBuilderPartnerships,
+  updatePartnershipStatus,
+} from '../../services/partnershipService';
 import { formatPhoneNumber } from '../../utils/formatters';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
-import AddPropertyModal from '../../components/dashboard/AddPropertyModal';
 import './BuilderDashboard.css';
 
+// Lazy-loaded heavy modal
+const AddPropertyModal = lazy(() => import('../../components/dashboard/AddPropertyModal'));
+const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
+
 const OwnerDashboard = () => {
-  const { user, showToast, logout } = useAuth();
+  const { user, accessToken, showToast, logout } = useAuth();
+  const { on, off } = useSocket(accessToken);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const validTabs = ['overview', 'listings', 'leads', 'visits'];
+  const validTabs = ['overview', 'listings', 'leads', 'visits', 'agents'];
   const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'overview');
 
   useEffect(() => {
@@ -66,6 +82,35 @@ const OwnerDashboard = () => {
   const [propertyStatusFilter, setPropertyStatusFilter] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editProperty, setEditProperty] = useState(null);
+  const [showKycModal, setShowKycModal] = useState(false);
+
+  const handleOpenAddProperty = useCallback((propToEdit = null) => {
+    if (propToEdit) {
+      setEditProperty(propToEdit);
+      setIsModalOpen(true);
+      return;
+    }
+
+    // MANDATORY KYC CHECK: Owner must be verified by Admin before adding new property
+    const kycStatus = user?.kycVerification?.status || 'unverified';
+    if (kycStatus !== 'verified') {
+      if (kycStatus === 'pending') {
+        showToast('Your owner verification documents are under review by the Administrator.', 'info');
+      } else if (kycStatus === 'rejected') {
+        showToast(
+          `Document verification rejected: ${user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
+          'error'
+        );
+      } else {
+        showToast('Mandatory document verification required before adding properties. Please upload your documents.', 'warning');
+      }
+      setShowKycModal(true);
+      return;
+    }
+
+    setEditProperty(null);
+    setIsModalOpen(true);
+  }, [user, showToast]);
 
   // Inquiries & Visits state
   const [inquiries, setInquiries] = useState([]);
@@ -84,6 +129,16 @@ const OwnerDashboard = () => {
   const [replyModalItem, setReplyModalItem] = useState(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+
+  // Agent Partnerships & Broker Acquisition state
+  const [partnerships, setPartnerships] = useState([]);
+  const [partnershipsLoading, setPartnershipsLoading] = useState(false);
+  const [partnershipStatusFilter, setPartnershipStatusFilter] = useState('all');
+  const [partnershipSearch, setPartnershipSearch] = useState('');
+  const [actionPartnershipId, setActionPartnershipId] = useState(null);
+  const [rejectReasonModal, setRejectReasonModal] = useState(null);
+  const [rejectionReasonText, setRejectionReasonText] = useState('');
+  const [newRequestNotification, setNewRequestNotification] = useState(null);
 
   const fetchProperties = useCallback(async (isBackground = false) => {
     try {
@@ -109,20 +164,125 @@ const OwnerDashboard = () => {
     }
   }, []);
 
-  // Real-time synchronization for inquiries and property listings (silent background updates)
+  const fetchPartnerships = useCallback(async (isBackground = false) => {
+    try {
+      if (!isBackground) setPartnershipsLoading(true);
+      const res = await getBuilderPartnerships();
+      if (res.success && Array.isArray(res.data)) {
+        setPartnerships(res.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch agent requests:', error);
+    } finally {
+      if (!isBackground) setPartnershipsLoading(false);
+    }
+  }, []);
+
+  // Real-time synchronization for inquiries, property listings, and agent partnerships
   useRealtimeSync(
-    [SYNC_EVENTS.INQUIRIES, SYNC_EVENTS.PROPERTIES],
+    [SYNC_EVENTS.INQUIRIES, SYNC_EVENTS.PROPERTIES, SYNC_EVENTS.PARTNERSHIPS],
     () => {
       fetchProperties(true);
       fetchInquiries(true);
+      fetchPartnerships(true);
     },
     { revalidateOnFocus: true, intervalMs: 15000 }
   );
 
+  // Server-push Socket.io real-time events
+  useEffect(() => {
+    on(SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED, (data) => {
+      fetchPartnerships(true);
+      setNewRequestNotification({
+        agentName: data.agentName || 'Channel Partner',
+        projectTitle: data.projectTitle || 'Your Property',
+        projectId: data.projectId,
+        partnershipId: data.partnershipId,
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        message: data.message || '',
+      });
+      showToast(`🤝 New Agent Request: ${data.agentName || 'An agent'} requested selling rights for "${data.projectTitle || 'your property'}"!`, 'info');
+    });
+
+    return () => {
+      off(SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED);
+    };
+  }, [on, off, fetchPartnerships, showToast]);
+
   useEffect(() => {
     fetchProperties(false);
     fetchInquiries(false);
-  }, [fetchProperties, fetchInquiries]);
+    fetchPartnerships(false);
+  }, [fetchProperties, fetchInquiries, fetchPartnerships]);
+
+  const handleToggleAcquisition = async (property) => {
+    const nextVal = !(property.allowAgentAcquisition || property.networkEnabled);
+    try {
+      const res = await updateProperty(property._id, {
+        allowAgentAcquisition: nextVal,
+        networkEnabled: nextVal,
+      });
+      if (res.success) {
+        setProperties((prev) =>
+          prev.map((p) =>
+            p._id === property._id
+              ? { ...p, allowAgentAcquisition: nextVal, networkEnabled: nextVal }
+              : p
+          )
+        );
+        broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'updated', id: property._id });
+        broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, { action: 'acquisition_toggled', id: property._id });
+        showToast(
+          nextVal
+            ? `Agent acquisition enabled for "${property.title}". Agents can now discover and request selling rights.`
+            : `Agent acquisition disabled for "${property.title}". Hidden from agent discovery.`,
+          'success'
+        );
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update agent acquisition setting', 'error');
+    }
+  };
+
+  const handleAcceptPartnership = async (partnershipId) => {
+    try {
+      setActionPartnershipId(partnershipId);
+      const res = await updatePartnershipStatus(partnershipId, 'approved');
+      if (res.success) {
+        setPartnerships((prev) =>
+          prev.map((item) => (item._id === partnershipId ? { ...item, ...res.data, status: 'approved' } : item))
+        );
+        broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, { action: 'approved', partnershipId });
+        showToast('Agent request approved! Referral tracking link activated for this agent.', 'success');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to approve agent request', 'error');
+    } finally {
+      setActionPartnershipId(null);
+    }
+  };
+
+  const handleRejectPartnership = async () => {
+    if (!rejectReasonModal) return;
+    const partnershipId = rejectReasonModal._id;
+    try {
+      setActionPartnershipId(partnershipId);
+      const res = await updatePartnershipStatus(partnershipId, 'rejected');
+      if (res.success) {
+        setPartnerships((prev) =>
+          prev.map((item) => (item._id === partnershipId ? { ...item, status: 'rejected' } : item))
+        );
+        broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, { action: 'rejected', partnershipId });
+        showToast('Agent request declined.', 'info');
+        setRejectReasonModal(null);
+        setRejectionReasonText('');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to decline agent request', 'error');
+    } finally {
+      setActionPartnershipId(null);
+    }
+  };
 
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this property listing?')) {
@@ -363,6 +523,25 @@ const OwnerDashboard = () => {
   const contactedCount = inquiries.filter((e) => e.status === 'contacted').length;
   const closedCount = inquiries.filter((e) => e.status === 'closed').length;
 
+  const pendingPartnerships = partnerships.filter((p) => p.status === 'pending');
+  const approvedPartnerships = partnerships.filter((p) => p.status === 'approved' || p.status === 'accepted');
+
+  const filteredPartnerships = partnerships.filter((p) => {
+    if (partnershipStatusFilter !== 'all') {
+      if (partnershipStatusFilter === 'approved' && p.status !== 'approved' && p.status !== 'accepted') return false;
+      if (partnershipStatusFilter === 'pending' && p.status !== 'pending') return false;
+      if (partnershipStatusFilter === 'rejected' && p.status !== 'rejected') return false;
+    }
+    if (partnershipSearch.trim()) {
+      const q = partnershipSearch.toLowerCase().trim();
+      const agentName = (p.agent?.name || '').toLowerCase();
+      const agency = (p.agent?.agencyName || p.agent?.agentProfile?.agencyName || '').toLowerCase();
+      const propTitle = (p.project?.title || '').toLowerCase();
+      if (!agentName.includes(q) && !agency.includes(q) && !propTitle.includes(q)) return false;
+    }
+    return true;
+  });
+
   const totalViews = properties.reduce((acc, curr) => acc + (curr.visits || 0), 0);
   const initials = getInitials(user?.name);
 
@@ -420,6 +599,24 @@ const OwnerDashboard = () => {
               <Calendar size={18} />
               Site Visits
               {siteVisitsList.length > 0 && <span className="badge warning">{siteVisitsList.length}</span>}
+            </button>
+          </div>
+
+          <div className="nav-section">
+            <div className="nav-section-label">Broker &amp; Agent Network</div>
+            <button
+              className={`nav-item w-full text-left bg-transparent border-0 flex items-center justify-between ${activeTab === 'agents' ? 'active' : ''}`}
+              onClick={() => handleTabChange('agents')}
+            >
+              <span className="flex items-center gap-2">
+                <Handshake size={18} />
+                <span>Agent Partners</span>
+              </span>
+              {pendingPartnerships.length > 0 ? (
+                <span className="badge warning">{pendingPartnerships.length}</span>
+              ) : approvedPartnerships.length > 0 ? (
+                <span className="badge success">{approvedPartnerships.length}</span>
+              ) : null}
             </button>
           </div>
 
@@ -482,7 +679,7 @@ const OwnerDashboard = () => {
             )}
             <button
               className="btn-primary flex items-center gap-2"
-              onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+              onClick={() => handleOpenAddProperty(null)}
             >
               <Plus size={16} /> Post New Property
             </button>
@@ -544,6 +741,17 @@ const OwnerDashboard = () => {
                   </div>
                   <div className="stat-value">{totalViews}</div>
                   <div className="stat-label">Total Buyer Views</div>
+                </div>
+
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('agents')}>
+                  <div className="stat-header">
+                    <div className="stat-icon purple">
+                      <Handshake size={20} />
+                    </div>
+                    <span className="stat-trend up">{pendingPartnerships.length > 0 ? `${pendingPartnerships.length} Pending` : 'Network'}</span>
+                  </div>
+                  <div className="stat-value">{partnershipsLoading ? '...' : approvedPartnerships.length}</div>
+                  <div className="stat-label">Agent Partners</div>
                 </div>
               </div>
 
@@ -831,7 +1039,7 @@ const OwnerDashboard = () => {
 
                   <button
                     className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"
-                    onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+                    onClick={() => handleOpenAddProperty(null)}
                   >
                     <Plus size={14} /> Post Property
                   </button>
@@ -897,6 +1105,26 @@ const OwnerDashboard = () => {
                                 <span className="block font-bold text-slate-800">{property.visits || 0}</span>
                                 <span className="text-[0.62rem] text-slate-400">Views</span>
                               </div>
+                            </div>
+
+                            {/* Agent Representation Toggle Row */}
+                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`w-2 h-2 rounded-full ${property.allowAgentAcquisition || property.networkEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                                <span className="text-slate-600 font-medium">Agent Network:</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAcquisition(property)}
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                  property.allowAgentAcquisition || property.networkEnabled
+                                    ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                                title="Click to toggle broker/agent representation rights for this listing"
+                              >
+                                {property.allowAgentAcquisition || property.networkEnabled ? 'Enabled (ON)' : 'Disabled (OFF)'}
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -1255,6 +1483,224 @@ const OwnerDashboard = () => {
               </div>
             </div>
           )}
+
+          {/* TAB 5: AGENT PARTNERS & SELLING RIGHTS */}
+          {activeTab === 'agents' && (
+            <div className="section-card">
+              <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Handshake size={18} className="text-purple-600" />
+                    <h3 className="section-title !mb-0">
+                      Agent Partners &amp; Selling Rights ({filteredPartnerships.length})
+                    </h3>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Review and authorize licensed Channel Partner Agents to market and sell your properties. Approved agents receive unique tracking links to bring you qualified buyers.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={partnershipSearch}
+                      onChange={(e) => setPartnershipSearch(e.target.value)}
+                      placeholder="Search agent or property..."
+                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-52"
+                    />
+                  </div>
+
+                  <select
+                    value={partnershipStatusFilter}
+                    onChange={(e) => setPartnershipStatusFilter(e.target.value)}
+                    className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
+                  >
+                    <option value="all">All Requests ({partnerships.length})</option>
+                    <option value="pending">Pending Approval ({pendingPartnerships.length})</option>
+                    <option value="approved">Active Partners ({approvedPartnerships.length})</option>
+                    <option value="rejected">Declined</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Property Acquisition Controls Banner */}
+              <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-bold text-blue-900 flex items-center gap-1.5">
+                    <ShieldCheck size={15} className="text-blue-600" />
+                    Broker Representation Network
+                  </h4>
+                  <p className="text-[11px] text-blue-700 mt-0.5">
+                    Allow trusted brokers and agents to represent your property. You can enable or disable agent discovery anytime on your listings.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleTabChange('listings')}
+                  className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs transition-colors shadow-xs shrink-0 inline-flex items-center gap-1.5"
+                >
+                  <Home size={13} /> Manage Property Settings
+                </button>
+              </div>
+
+              <div className="section-body">
+                {partnershipsLoading ? (
+                  <div className="text-center py-12 text-slate-500 text-xs">
+                    <span className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin inline-block mr-2" />
+                    Loading agent partner requests...
+                  </div>
+                ) : filteredPartnerships.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                    <Award size={36} className="text-slate-400 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">No agent requests found</p>
+                    <p className="text-xs text-slate-500 mt-1 mb-4">
+                      {partnerships.length === 0
+                        ? 'Make sure "Allow Agent Acquisition" is turned ON on your properties so agents can discover and apply to represent them.'
+                        : 'No agent partnerships match your current filter.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredPartnerships.map((item) => {
+                      const agent = item.agent || {};
+                      const property = item.project || {};
+                      const isApproved = item.status === 'approved' || item.status === 'accepted';
+                      const isPending = item.status === 'pending';
+                      const isRejected = item.status === 'rejected';
+
+                      return (
+                        <div
+                          key={item._id}
+                          className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
+                        >
+                          {/* Agent Info & Target Property */}
+                          <div className="flex items-start gap-3.5 min-w-0 flex-1">
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-xs">
+                              {getInitials(agent.name)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <h4 className="font-bold text-sm text-slate-900 truncate">
+                                  {agent.name || 'Channel Partner'}
+                                </h4>
+                                {agent.agencyName && (
+                                  <span className="text-xs text-slate-500 font-medium">
+                                    · {agent.agencyName}
+                                  </span>
+                                )}
+                                {isApproved && (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                    <CheckCircle2 size={11} /> Authorized Partner
+                                  </span>
+                                )}
+                                {isPending && (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                                    <Clock size={11} /> Needs Review
+                                  </span>
+                                )}
+                                {isRejected && (
+                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                                    <X size={11} /> Request Declined
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-xs text-slate-600 flex items-center gap-3 mb-1.5 flex-wrap">
+                                {agent.phone && (
+                                  <span className="flex items-center gap-1">
+                                    <Phone size={11} className="text-slate-400" />
+                                    {formatPhoneNumber(agent.phone)}
+                                  </span>
+                                )}
+                                {agent.email && (
+                                  <span className="flex items-center gap-1">
+                                    <Mail size={11} className="text-slate-400" />
+                                    {agent.email}
+                                  </span>
+                                )}
+                                {agent.reraNumber && (
+                                  <span className="text-[11px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                                    RERA: {agent.reraNumber}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-xs text-slate-700 font-medium bg-slate-50 p-2 rounded-xl border border-slate-100 mb-1">
+                                <span className="text-slate-400 font-normal">Requested for Property: </span>
+                                <strong className="text-slate-900">{property.title || 'Your Property'}</strong>
+                                {item.notes && (
+                                  <div className="mt-1 text-[11px] text-slate-600 italic">
+                                    &ldquo;{item.notes}&rdquo;
+                                  </div>
+                                )}
+                              </div>
+
+                              {isApproved && (
+                                <div className="text-[11px] text-emerald-800 font-bold flex items-center gap-1 mt-1">
+                                  <Award size={12} />
+                                  <span>Agent Tracking Code: </span>
+                                  <code className="bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 text-emerald-900 font-mono text-[11px]">
+                                    {item.agentCode}
+                                  </code>
+                                  <span className="text-slate-400 ml-1">· Commission: {item.commissionRate || 2.5}%</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Actions */}
+                          <div className="shrink-0 flex items-center gap-2">
+                            {isPending ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={actionPartnershipId === item._id}
+                                  onClick={() => handleAcceptPartnership(item._id)}
+                                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                >
+                                  <Check size={14} />
+                                  <span>{actionPartnershipId === item._id ? 'Approving...' : 'Approve Agent'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={actionPartnershipId === item._id}
+                                  onClick={() => setRejectReasonModal(item)}
+                                  className="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300 text-slate-700 font-bold text-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  <X size={14} />
+                                  <span>Decline</span>
+                                </button>
+                              </>
+                            ) : isApproved ? (
+                              <button
+                                type="button"
+                                disabled={actionPartnershipId === item._id}
+                                onClick={() => setRejectReasonModal(item)}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-rose-50 hover:text-rose-700 text-slate-500 font-medium text-xs transition-colors cursor-pointer"
+                              >
+                                Revoke Selling Rights
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={actionPartnershipId === item._id}
+                                onClick={() => handleAcceptPartnership(item._id)}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold text-xs border border-emerald-200 transition-colors cursor-pointer"
+                              >
+                                Re-approve Agent
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1442,20 +1888,142 @@ const OwnerDashboard = () => {
       )}
 
       {/* Add / Edit Property Modal */}
-      <AddPropertyModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-        }}
-        onSuccess={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-          broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
-          fetchProperties();
-        }}
-        initialData={editProperty}
-      />
+      {isModalOpen && (
+        <Suspense fallback={null}>
+          <AddPropertyModal
+            isOpen={isModalOpen}
+            onClose={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+            }}
+            onSuccess={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+              broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
+              fetchProperties();
+            }}
+            initialData={editProperty}
+          />
+        </Suspense>
+      )}
+
+      {/* Mandatory KYC Verification Modal for Owner */}
+      {showKycModal && (
+        <Suspense fallback={null}>
+          <KycVerificationModal
+            isOpen={showKycModal}
+            onClose={() => setShowKycModal(false)}
+            user={user}
+            showToast={showToast}
+            onVerificationSubmitted={(kycData) => {
+              if (user) {
+                user.kycVerification = kycData;
+              }
+            }}
+          />
+        </Suspense>
+      )}
+
+      {/* Decline / Revoke Agent Request Modal */}
+      {rejectReasonModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+              <h4 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <AlertCircle size={18} className="text-rose-600" />
+                Decline Agent Representation
+              </h4>
+              <button
+                onClick={() => {
+                  setRejectReasonModal(null);
+                  setRejectionReasonText('');
+                }}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-4">
+              Are you sure you want to decline or revoke selling rights for <strong>{rejectReasonModal.agent?.name}</strong> on <strong>{rejectReasonModal.project?.title || 'this property'}</strong>?
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setRejectReasonModal(null);
+                  setRejectionReasonText('');
+                }}
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRejectPartnership}
+                disabled={actionPartnershipId === rejectReasonModal._id}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-colors cursor-pointer"
+              >
+                {actionPartnershipId === rejectReasonModal._id ? 'Declining...' : 'Confirm Decline'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Real-time Agent Request Notification Modal */}
+      {newRequestNotification && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-left animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <Award size={20} />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-base">New Agent Selling Request!</h4>
+                <p className="text-xs text-slate-500">A Channel Partner wants to market your property</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5 mb-4">
+              <div>
+                <span className="text-slate-500">Agent: </span>
+                <strong className="text-slate-800">{newRequestNotification.agentName}</strong>
+              </div>
+              <div>
+                <span className="text-slate-500">Property: </span>
+                <strong className="text-slate-800">{newRequestNotification.projectTitle}</strong>
+              </div>
+              {newRequestNotification.message && (
+                <div className="pt-1 text-slate-600 italic">
+                  &ldquo;{newRequestNotification.message}&rdquo;
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setNewRequestNotification(null)}
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setNewRequestNotification(null);
+                  handleTabChange('agents');
+                }}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Award size={14} /> Review Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

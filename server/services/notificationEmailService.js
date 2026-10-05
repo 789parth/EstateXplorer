@@ -15,11 +15,14 @@ async function notifySellerOnNewLeadEmail({ sellerUser, inquiry, property }) {
     return { skipped: true, reason: 'SELLER_EMAIL_NOTIFICATIONS_DISABLED' };
   }
 
+  const { projectLeadForUser } = require('./leadPrivacyService');
+  const safeInquiry = projectLeadForUser(inquiry, sellerUser);
+
   const propTitle = property?.title || inquiry?.propertyTitle || 'Property Listing';
   const buyerName = inquiry?.name || 'A prospective buyer';
-  const buyerEmail = inquiry?.email || 'N/A';
-  const buyerPhone = inquiry?.phone || 'N/A';
-  const buyerMessage = inquiry?.message || 'I am interested in this property.';
+  const buyerEmail = safeInquiry?.email || 'N/A';
+  const buyerPhone = safeInquiry?.phone || 'N/A';
+  const buyerMessage = safeInquiry?.message || 'I am interested in this property.';
   const isVisit = Boolean(inquiry.visitRequested || inquiry.visitDate);
 
   const subject = isVisit
@@ -95,7 +98,7 @@ async function notifySellerOnNewLeadEmail({ sellerUser, inquiry, property }) {
     await sendEmail({
       email: sellerUser.email,
       subject,
-      message: `${isVisit ? 'New site visit booked' : 'New lead received'} by ${buyerName} (${buyerPhone}) for "${propTitle}". View details: ${dashboardUrl}`,
+      message: `${isVisit ? 'New site visit booked' : 'New lead received'} by ${buyerName} for "${propTitle}". View details in your dashboard: ${dashboardUrl}`,
       html,
     });
 
@@ -108,7 +111,7 @@ async function notifySellerOnNewLeadEmail({ sellerUser, inquiry, property }) {
         channel: 'email',
         type: isVisit ? 'SITE_VISIT_BOOKED' : 'LEAD_ALERT',
         title: isVisit ? `New Site Visit Tour Booked` : `New Lead Inquired`,
-        message: `${buyerName} (${buyerPhone}) inquired about "${propTitle}"`,
+        message: `${buyerName} inquired about "${propTitle}"`,
         gateway: 'email',
         status: 'DELIVERED',
         isRead: false,
@@ -117,8 +120,6 @@ async function notifySellerOnNewLeadEmail({ sellerUser, inquiry, property }) {
           propertyId: property?._id,
           propertyTitle: propTitle,
           buyerName,
-          buyerPhone,
-          buyerEmail,
         },
       });
     } catch (logErr) {

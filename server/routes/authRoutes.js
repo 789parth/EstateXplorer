@@ -25,10 +25,13 @@ const {
   verifyRegistrationOTP,
   sendPhoneVerificationOTP,
   verifyPhoneOTP,
+  adminLogin,
+  submitKycDocuments,
+  getKycStatus,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validateMiddleware');
-const { authRateLimiter } = require('../middleware/rateLimitMiddleware');
+const { authRateLimiter, otpRateLimiter } = require('../middleware/rateLimitMiddleware');
 
 const router = express.Router();
 
@@ -47,7 +50,7 @@ router.post(
 
 router.post(
   '/register-send-otp',
-  authRateLimiter,
+  otpRateLimiter,
   [
     body('name').notEmpty().withMessage('Name is required').isLength({ min: 2, max: 50 }).withMessage('Name must be 2-50 chars'),
     body('email').isEmail().withMessage('Please provide a valid email'),
@@ -60,7 +63,7 @@ router.post(
 
 router.post(
   '/register-verify-otp',
-  authRateLimiter,
+  otpRateLimiter,
   [
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('name').notEmpty().withMessage('Name is required'),
@@ -83,6 +86,17 @@ router.post(
   login
 );
 
+router.post(
+  '/admin-secure-login',
+  authRateLimiter,
+  [
+    body('email').isEmail().withMessage('Please provide a valid administrative email'),
+    body('password').notEmpty().withMessage('Administrative password is required'),
+    validate,
+  ],
+  adminLogin
+);
+
 router.post('/logout', logout);
 router.post('/refresh', refresh);
 router.get('/me', protect, getMe);
@@ -90,13 +104,14 @@ router.delete('/delete-account', protect, deleteAccount);
 
 router.post(
   '/forgot-password',
-  authRateLimiter,
+  otpRateLimiter,
   [body('email').isEmail().withMessage('Please provide a valid email'), validate],
   forgotPassword
 );
 
 router.post(
   '/verify-otp',
+  otpRateLimiter,
   [
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('code').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
@@ -107,6 +122,7 @@ router.post(
 
 router.post(
   '/reset-password',
+  otpRateLimiter,
   [
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('code').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits'),
@@ -153,7 +169,7 @@ router.put(
 // Two-Factor Authentication
 router.post(
   '/verify-2fa',
-  authRateLimiter,
+  otpRateLimiter,
   [
     body('email').isEmail().withMessage('Please provide a valid email'),
     body('code').isLength({ min: 6, max: 6 }).withMessage('Verification code must be 6 digits'),
@@ -163,16 +179,17 @@ router.post(
 );
 router.post(
   '/resend-2fa',
-  authRateLimiter,
+  otpRateLimiter,
   [body('email').isEmail().withMessage('Please provide a valid email'), validate],
   resend2FA
 );
 router.patch('/toggle-2fa', protect, toggleTwoFactor);
 
 // Email Verification
-router.post('/send-verify-email', protect, authRateLimiter, sendVerifyEmailOTP);
+router.post('/send-verify-email', protect, otpRateLimiter, sendVerifyEmailOTP);
 router.post(
   '/verify-email',
+  authRateLimiter,
   protect,
   [
     body('code').isLength({ min: 6, max: 6 }).withMessage('Verification code must be 6 digits'),
@@ -185,6 +202,7 @@ router.post(
 router.post('/send-phone-otp', protect, authRateLimiter, sendPhoneVerificationOTP);
 router.post(
   '/verify-phone-otp',
+  otpRateLimiter,
   protect,
   [
     body('code').isLength({ min: 6, max: 6 }).withMessage('Verification code must be 6 digits'),
@@ -197,6 +215,10 @@ router.post(
 router.post('/request-role', protect, requestRole);
 router.get('/my-role-requests', protect, getMyRoleRequests);
 router.post('/switch-role', protect, switchRole);
+
+// Document / KYC Verification for Builder, Agent, Owner before adding property
+router.post('/kyc/submit', protect, submitKycDocuments);
+router.get('/kyc/status', protect, getKycStatus);
 
 // Google OAuth
 router.post('/google', googleAuth);

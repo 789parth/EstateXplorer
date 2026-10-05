@@ -7,6 +7,7 @@ import { createProperty, updateProperty, uploadMultipleImages } from '../../serv
 import { useAuth } from '../../hooks/useAuth';
 import { INDIAN_STATES } from '../../utils/indianStates';
 import { formatPrice, formatTitleCase, formatCode, sanitizeInput, getPublicImageUrl, isVideoUrl } from '../../utils/formatters';
+import KycVerificationModal from './KycVerificationModal';
 
 const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) => {
   const { user, showToast } = useAuth();
@@ -14,6 +15,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
   const [uploadingFiles, setUploadingFiles] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [images, setImages] = useState(['']);
+  const [showKycModal, setShowKycModal] = useState(false);
 
   const {
     register,
@@ -21,6 +23,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
     reset,
     setValue,
     trigger,
+    clearErrors,
     formState: { errors },
     watch
   } = useForm({
@@ -38,6 +41,17 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
   const watchedPrice = watch('price');
   const watchedArea = watch('area');
   const watchedPurpose = watch('purpose');
+  const watchedCategory = watch('category');
+  const watchedRera = watch('rera');
+
+  React.useEffect(() => {
+    if (!watchedRera) {
+      setValue('reraId', '');
+      clearErrors('reraId');
+    } else {
+      trigger('reraId');
+    }
+  }, [watchedRera, setValue, clearErrors, trigger]);
 
   const computedDisplayPrice = React.useMemo(() => {
     if (!watchedPrice || Number(watchedPrice) <= 0) return '';
@@ -154,7 +168,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         title: sanitizeInput(data.title),
         description: data.description ? data.description.trim() : '',
         type: data.type,
-        category: data.category || 'property',
+        category: user?.role === 'owner' ? 'property' : (data.category || 'property'),
         purpose: purpose,
         price: numPrice,
         priceDisplay: autoPriceDisplay,
@@ -185,8 +199,8 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         amenities,
         usps,
         images: validImages,
-        reraId: formatCode(data.reraId),
-        rera: data.rera,
+        reraId: data.rera ? formatCode(data.reraId) : '',
+        rera: Boolean(data.rera),
         isFeatured: data.isFeatured,
         allowAgentAcquisition: Boolean(data.allowAgentAcquisition),
         networkEnabled: Boolean(data.allowAgentAcquisition),
@@ -207,7 +221,12 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         onSuccess(); // Refresh list and close
       }
     } catch (err) {
-      showToast(err.response?.data?.message || (initialData ? 'Failed to update listing' : 'Failed to create listing'), 'error');
+      if (err.response?.data?.requiresKyc) {
+        showToast(err.response?.data?.message || 'Mandatory document verification required.', 'warning');
+        setShowKycModal(true);
+      } else {
+        showToast(err.response?.data?.message || (initialData ? 'Failed to update listing' : 'Failed to create listing'), 'error');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -258,7 +277,13 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 sticky top-0 bg-white z-10 shrink-0">
           <div className="min-w-0 pr-2">
             <h2 className="text-lg sm:text-xl font-bold text-navy truncate">{initialData ? 'Edit Listing' : 'Add New Listing'}</h2>
-            <p className="text-xs sm:text-sm text-muted truncate">{initialData ? 'Update the details of your listing.' : 'Create a new project or property listing.'}</p>
+            <p className="text-xs sm:text-sm text-muted truncate">
+              {initialData
+                ? 'Update the details of your listing.'
+                : user?.role === 'owner'
+                ? 'Create a new individual property listing.'
+                : 'Create a new project or property listing.'}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -293,13 +318,26 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                     Category <span className="text-rose-500 font-bold">*</span>
                   </label>
-                  <select
-                    className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm text-navy focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 shadow-2xs font-medium"
-                    {...register('category', { required: true })}
-                  >
-                    <option value="property">Individual Property</option>
-                    <option value="project">New Project</option>
-                  </select>
+                  {user?.role === 'owner' ? (
+                    <div>
+                      <input
+                        type="text"
+                        value="Individual Property"
+                        readOnly
+                        disabled
+                        className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-300 rounded-lg text-sm text-slate-700 font-medium cursor-not-allowed select-none shadow-2xs"
+                      />
+                      <input type="hidden" value="property" {...register('category')} />
+                    </div>
+                  ) : (
+                    <select
+                      className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-lg text-sm text-navy focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600 shadow-2xs font-medium"
+                      {...register('category', { required: true })}
+                    >
+                      <option value="property">Individual Property</option>
+                      <option value="project">New Project</option>
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
@@ -484,9 +522,19 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
                   </div>
                   <Input
                     label="RERA ID"
-                    optional={true}
-                    placeholder="e.g. PR/GJ/ANAND/..."
-                    {...register('reraId')}
+                    required={Boolean(watchedRera)}
+                    optional={!watchedRera}
+                    disabled={!watchedRera}
+                    placeholder={watchedRera ? "e.g. PR/GJ/ANAND/..." : "Enable 'RERA Registered' to enter RERA ID"}
+                    error={errors.reraId?.message}
+                    {...register('reraId', {
+                      validate: (val) => {
+                        if (watchedRera && (!val || !val.trim())) {
+                          return 'RERA ID is required when RERA Registered is selected';
+                        }
+                        return true;
+                      }
+                    })}
                   />
                 </div>
               </div>
@@ -681,7 +729,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
                   </label>
                 </div>
 
-                {/* Allow Agents to Acquire This Project */}
+                {/* Allow Agents to Acquire / Represent This Project / Property */}
                 <div className="flex items-start gap-2.5 mt-3 p-3 bg-emerald-50/60 rounded-lg border border-emerald-200/80">
                   <input
                     type="checkbox"
@@ -691,10 +739,10 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
                   />
                   <div>
                     <label htmlFor="allowAgentAcquisition" className="text-xs sm:text-sm font-bold text-slate-900 cursor-pointer block">
-                      Allow Agents to Acquire This Project
+                      Allow Agents to Acquire / Represent This {watchedCategory === 'project' ? 'Project' : 'Property'}
                     </label>
                     <span className="text-[0.72rem] text-slate-600 block mt-0.5 leading-relaxed">
-                      When checked, registered agents can discover this project in <strong>Agent Dashboard → Find Projects</strong>, view complete project details, and request to become an affiliated selling agent.
+                      When checked, registered agents can discover this {watchedCategory === 'project' ? 'project' : 'property'} in <strong>Agent Dashboard → Find Projects &amp; Properties</strong>, view details, and request to become an affiliated selling agent.
                     </span>
                   </div>
                 </div>
@@ -725,6 +773,17 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
           </Button>
         </div>
       </div>
+
+      {/* KYC Verification Modal */}
+      <KycVerificationModal
+        isOpen={showKycModal}
+        onClose={() => setShowKycModal(false)}
+        user={user}
+        showToast={showToast}
+        onVerificationSubmitted={(kycData) => {
+          if (user) user.kycVerification = kycData;
+        }}
+      />
     </div>
   );
 };

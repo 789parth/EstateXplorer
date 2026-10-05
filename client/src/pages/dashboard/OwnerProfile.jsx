@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Home, Users, Eye, Trash2, Calendar } from 'lucide-react';
+import { Home, Users, Eye, Trash2, Calendar, Handshake } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { getMyProperties, getMyInquiries } from '../../services/propertyService';
+import { getBuilderPartnerships } from '../../services/partnershipService';
 import { INDIAN_STATES } from '../../utils/indianStates';
 import { formatPhoneNumber, formatTitleCase, sanitizeInput, isValidIndianMobile } from '../../utils/formatters';
 import RoleManagementSection from '../../components/dashboard/RoleManagementSection';
@@ -51,14 +52,16 @@ const OwnerProfile = () => {
   const [propertiesCount, setPropertiesCount] = useState(0);
   const [inquiriesCount, setInquiriesCount] = useState(0);
   const [visitCount, setVisitCount] = useState(0);
+  const [agentPartnersCount, setAgentPartnersCount] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
     const fetchCounts = async () => {
       try {
-        const [propsRes, inqsRes] = await Promise.allSettled([
+        const [propsRes, inqsRes, partRes] = await Promise.allSettled([
           getMyProperties(),
           getMyInquiries(),
+          getBuilderPartnerships(),
         ]);
 
         if (isMounted) {
@@ -69,6 +72,12 @@ const OwnerProfile = () => {
             const inqs = inqsRes.value.data;
             setInquiriesCount(inqs.length);
             setVisitCount(inqs.filter((e) => e.status === 'visit').length);
+          }
+          if (partRes.status === 'fulfilled' && partRes.value?.success && Array.isArray(partRes.value.data)) {
+            const parts = partRes.value.data;
+            const pending = parts.filter((p) => p.status === 'pending');
+            const approved = parts.filter((p) => p.status === 'approved' || p.status === 'accepted');
+            setAgentPartnersCount(pending.length > 0 ? pending.length : approved.length);
           }
         }
       } catch (err) {
@@ -172,13 +181,26 @@ const OwnerProfile = () => {
             </Link>
             <Link className="nav-item" to="/dashboard?tab=leads">
               <Users size={18} />
-              Buyer Inquiries
+              Property Inquiries
               {inquiriesCount > 0 && <span className="badge">{inquiriesCount}</span>}
             </Link>
             <Link className="nav-item" to="/dashboard?tab=visits">
               <Calendar size={18} />
               Site Visits
               {visitCount > 0 && <span className="badge warning">{visitCount}</span>}
+            </Link>
+          </div>
+
+          <div className="nav-section">
+            <div className="nav-section-label">Broker &amp; Agent Network</div>
+            <Link className="nav-item flex items-center justify-between" to="/dashboard?tab=agents">
+              <span className="flex items-center gap-2">
+                <Handshake size={18} />
+                <span>Agent Partners</span>
+              </span>
+              {agentPartnersCount > 0 && (
+                <span className="badge success">{agentPartnersCount}</span>
+              )}
             </Link>
           </div>
 

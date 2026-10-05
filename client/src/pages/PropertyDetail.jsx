@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
   Bed,
@@ -25,7 +25,7 @@ import {
   Check,
   Award,
 } from 'lucide-react';
-import { getProperty, submitInquiry, toggleWishlistApi, getUserWishlist, getMyInquiries, getBuyerInquiries } from '../services/propertyService';
+import { getProperty, recordPropertyAttribution, submitInquiry, toggleWishlistApi, getUserWishlist, getMyInquiries, getBuyerInquiries } from '../services/propertyService';
 import { getProjectPartnership } from '../services/partnershipService';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../utils/realtimeSync';
 import { useAuth } from '../hooks/useAuth';
@@ -33,16 +33,22 @@ import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import Modal from '../components/common/Modal';
 import ShareModal from '../components/common/ShareModal';
-import LoginForm from '../components/auth/LoginForm';
-import RegisterForm from '../components/auth/RegisterForm';
-import ForgotForm from '../components/auth/ForgotForm';
-import EmiCalculator from '../components/property/EmiCalculator';
-import PropertyCompare from '../components/property/PropertyCompare';
-import SimilarProperties from '../components/property/SimilarProperties';
 import EmailVerificationModal from '../components/common/EmailVerificationModal';
-import RequestSellingRightsModal from '../components/dashboard/RequestSellingRightsModal';
 import { formatPrice, formatPhoneNumber, formatTitleCase, getPublicImageUrl, isVideoUrl, isValidIndianMobile } from '../utils/formatters';
 import './PropertyDetail.css';
+
+// Auth forms — only shown in modals, lazy-load to keep PropertyDetail initial bundle lean
+const LoginForm = lazy(() => import('../components/auth/LoginForm'));
+const RegisterForm = lazy(() => import('../components/auth/RegisterForm'));
+const ForgotForm = lazy(() => import('../components/auth/ForgotForm'));
+
+// Below-the-fold / interaction-only components — lazy-load to avoid blocking initial parse
+const EmiCalculator = lazy(() => import('../components/property/EmiCalculator'));
+const PropertyCompare = lazy(() => import('../components/property/PropertyCompare'));
+const SimilarProperties = lazy(() => import('../components/property/SimilarProperties'));
+const RequestSellingRightsModal = lazy(() => import('../components/dashboard/RequestSellingRightsModal'));
+
+const MODAL_FALLBACK = <div className="py-8 text-center text-slate-400 text-sm">Loading…</div>;
 
 // ── Real-World Site Visit Time Slots & Coordination Helpers ──
 export const SITE_VISIT_TIME_SLOTS = [
@@ -155,7 +161,9 @@ const PropertyDetail = () => {
   const agentParam = searchParams.get('agent');
   useEffect(() => {
     if (agentParam) {
-      sessionStorage.setItem(`cp_agent_${id}`, agentParam.trim().toUpperCase());
+      const code = agentParam.trim().toUpperCase();
+      sessionStorage.setItem(`cp_agent_${id}`, code);
+      recordPropertyAttribution(id, code).catch(() => {});
     }
   }, [agentParam, id]);
 
@@ -956,7 +964,7 @@ const PropertyDetail = () => {
                       document.getElementById('emi-calculator')?.scrollIntoView({ behavior: 'smooth' });
                     }}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-600 bg-slate-100 hover:bg-slate-200/80 px-2.5 py-1 rounded-md border border-slate-200/80 transition-all cursor-pointer shadow-2xs"
-                    title="Calculate Home Loan EMI"
+                    title={`Calculate ${property.category === 'project' || property.isProject ? 'Project' : 'Property'} Loan EMI`}
                   >
                     <Calculator size={13} className="text-amber-500" />
                     <span>Calculate EMI</span>
@@ -1082,10 +1090,14 @@ const PropertyDetail = () => {
             )}
 
             {/* ── Mortgage & Home Loan EMI Calculator ── */}
-            <EmiCalculator property={property} />
+            <Suspense fallback={MODAL_FALLBACK}>
+              <EmiCalculator property={property} />
+            </Suspense>
 
             {/* ── Property / Project Comparison Matrix ── */}
-            <PropertyCompare currentProperty={property} />
+            <Suspense fallback={MODAL_FALLBACK}>
+              <PropertyCompare currentProperty={property} />
+            </Suspense>
           </div>
 
           {/* ── RIGHT: Sidebar ── */}
@@ -1111,7 +1123,7 @@ const PropertyDetail = () => {
                 <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-blue-100">
                   <div className="flex items-center gap-2 text-blue-950 font-bold text-sm">
                     <ShieldCheck size={18} className="text-blue-600" />
-                    <span>Become an Agent for This Project</span>
+                    <span>Become an Agent for This {property.category === 'project' ? 'Project' : 'Property'}</span>
                   </div>
                   {(!property.allowAgentAcquisition && !property.networkEnabled) ? (
                     <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
@@ -1139,13 +1151,13 @@ const PropertyDetail = () => {
                 {(!property.allowAgentAcquisition && !property.networkEnabled) ? (
                   <div className="space-y-2">
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      The builder has currently disabled agent acquisition for this project. Check back later or explore other partner-ready projects.
+                      The {property.category === 'project' ? 'builder' : 'seller'} has currently disabled agent acquisition for this {property.category === 'project' ? 'project' : 'property'}. Check back later or explore other partner-ready opportunities.
                     </p>
                     <Link
                       to="/dashboard?tab=find-projects"
                       className="inline-flex items-center justify-center w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-all"
                     >
-                      Browse Available Projects
+                      Browse Available Opportunities
                     </Link>
                   </div>
                 ) : agentPartnership?.status === 'pending' ? (
@@ -1154,7 +1166,7 @@ const PropertyDetail = () => {
                       <Clock size={16} className="shrink-0 mt-0.5 text-amber-600" />
                       <div>
                         <strong className="block font-semibold">Request Sent — Pending Approval</strong>
-                        <span>Your acquisition request has been sent to {property.builder?.companyName || property.builder?.name || 'the builder'} and is awaiting review.</span>
+                        <span>Your acquisition request has been sent to {property.builder?.companyName || property.builder?.name || property.user?.name || (property.category === 'project' ? 'the builder' : 'the seller')} and is awaiting review.</span>
                       </div>
                     </div>
                     <button
@@ -1171,7 +1183,7 @@ const PropertyDetail = () => {
                     <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900 text-xs">
                       <div className="flex items-center gap-1.5 font-bold mb-1">
                         <CheckCircle2 size={15} className="text-emerald-600" />
-                        <span>You are an authorized agent for this project!</span>
+                        <span>You are an authorized agent for this {property.category === 'project' ? 'project' : 'property'}!</span>
                       </div>
                       <p className="text-[11px] text-emerald-800 leading-relaxed">
                         Earn up to <strong>{property.defaultCommissionRate || 2}% commission</strong> on verified bookings. Share your unique referral link to capture buyer leads directly:
@@ -1243,15 +1255,15 @@ const PropertyDetail = () => {
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      Earn up to <strong>{property.defaultCommissionRate || 2}% commission</strong> on every verified booking for this project. Apply for authorized selling rights to receive your exclusive client tracking URL.
+                      Earn up to <strong>{property.defaultCommissionRate || 2}% commission</strong> on every verified booking for this {property.category === 'project' ? 'project' : 'property'}. Apply for authorized selling rights to receive your exclusive client tracking URL.
                     </p>
                     <button
                       type="button"
                       onClick={() => setIsRequestRightsOpen(true)}
-                      className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
                     >
                       <ShieldCheck size={15} />
-                      <span>Request to Become Agent</span>
+                      <span>Request to Become Agent for This {property.category === 'project' ? 'Project' : 'Property'}</span>
                     </button>
                   </div>
                 )}
@@ -1331,7 +1343,9 @@ const PropertyDetail = () => {
         </div>
 
         {/* ── Similar Property / Project Section (Price & Location Based) ── */}
-        <SimilarProperties currentProperty={property} />
+        <Suspense fallback={MODAL_FALLBACK}>
+          <SimilarProperties currentProperty={property} />
+        </Suspense>
       </main>
 
       {/* ── Inquiry / Site Visit Modal ── */}
@@ -1492,14 +1506,16 @@ const PropertyDetail = () => {
         onClose={() => setAuthModalState(null)}
         title="Sign In to EstateXplorer"
       >
-        <LoginForm
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToRegister={(email) => {
-            if (email) setAuthModalEmail(email);
-            setAuthModalState('register');
-          }}
-          onSwitchToForgot={() => setAuthModalState('forgot')}
-        />
+        <Suspense fallback={MODAL_FALLBACK}>
+          <LoginForm
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToRegister={(email) => {
+              if (email) setAuthModalEmail(email);
+              setAuthModalState('register');
+            }}
+            onSwitchToForgot={() => setAuthModalState('forgot')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -1507,11 +1523,13 @@ const PropertyDetail = () => {
         onClose={() => setAuthModalState(null)}
         title="Create your EstateXplorer Account"
       >
-        <RegisterForm
-          initialEmail={authModalEmail}
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={MODAL_FALLBACK}>
+          <RegisterForm
+            initialEmail={authModalEmail}
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -1519,13 +1537,15 @@ const PropertyDetail = () => {
         onClose={() => setAuthModalState(null)}
         title="Reset Your Password"
       >
-        <ForgotForm
-          onOtpSent={(email) => {
-            setAuthModalState(null);
-            navigate('/reset-password', { state: { email } });
-          }}
-          onBackToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={MODAL_FALLBACK}>
+          <ForgotForm
+            onOtpSent={(email) => {
+              setAuthModalState(null);
+              navigate('/reset-password', { state: { email } });
+            }}
+            onBackToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       {/* Professional Property Share Modal */}
@@ -1535,7 +1555,7 @@ const PropertyDetail = () => {
         property={property}
       />
 
-      {/* Mandatory Email Verification Modal for Bookings & Inquiries */}
+      {/* Email Verification Gate */}
       <EmailVerificationModal
         isOpen={verifyModalOpen}
         onClose={() => setVerifyModalOpen(false)}
@@ -1547,19 +1567,23 @@ const PropertyDetail = () => {
       />
 
       {/* Request Selling Rights Modal for Agents */}
-      <RequestSellingRightsModal
-        isOpen={isRequestRightsOpen}
-        project={property}
-        showToast={showToast}
-        onClose={() => setIsRequestRightsOpen(false)}
-        onSuccess={() => {
-          setIsRequestRightsOpen(false);
-          fetchAgentPartnershipStatus();
-          if (showToast) showToast('Selling rights application submitted to developer!', 'success');
-        }}
-      />
+      <Suspense fallback={null}>
+        <RequestSellingRightsModal
+          isOpen={isRequestRightsOpen}
+          project={property}
+          showToast={showToast}
+          onClose={() => setIsRequestRightsOpen(false)}
+          onSuccess={() => {
+            setIsRequestRightsOpen(false);
+            fetchAgentPartnershipStatus();
+            if (showToast) showToast('Selling rights application submitted to developer!', 'success');
+          }}
+        />
+      </Suspense>
     </div>
   );
 };
 
+
 export default PropertyDetail;
+

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -49,9 +49,13 @@ import {
 } from '../../services/partnershipService';
 import { formatPhoneNumber, formatPrice } from '../../utils/formatters';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
-import AddPropertyModal from '../../components/dashboard/AddPropertyModal';
-import RequestSellingRightsModal from '../../components/dashboard/RequestSellingRightsModal';
 import './BuilderDashboard.css';
+
+// Lazy-loaded heavy dashboard modals — keeps dashboard initial chunk lean and fast
+const AddPropertyModal = lazy(() => import('../../components/dashboard/AddPropertyModal'));
+const RequestSellingRightsModal = lazy(() => import('../../components/dashboard/RequestSellingRightsModal'));
+const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModal'));
+const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
 const AgentDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
@@ -82,6 +86,35 @@ const AgentDashboard = () => {
   const [propertyStatusFilter, setPropertyStatusFilter] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editProperty, setEditProperty] = useState(null);
+  const [showKycModal, setShowKycModal] = useState(false);
+
+  const handleOpenAddProperty = useCallback((propToEdit = null) => {
+    if (propToEdit) {
+      setEditProperty(propToEdit);
+      setIsModalOpen(true);
+      return;
+    }
+
+    // MANDATORY KYC CHECK: Agent must be verified by Admin before adding new property
+    const kycStatus = user?.kycVerification?.status || 'unverified';
+    if (kycStatus !== 'verified') {
+      if (kycStatus === 'pending') {
+        showToast('Your agent verification documents are under review by the Administrator.', 'info');
+      } else if (kycStatus === 'rejected') {
+        showToast(
+          `Document verification rejected: ${user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
+          'error'
+        );
+      } else {
+        showToast('Mandatory document verification required before adding properties. Please upload your documents.', 'warning');
+      }
+      setShowKycModal(true);
+      return;
+    }
+
+    setEditProperty(null);
+    setIsModalOpen(true);
+  }, [user, showToast]);
 
   // Inquiries & Visits state
   const [inquiries, setInquiries] = useState([]);
@@ -90,6 +123,7 @@ const AgentDashboard = () => {
   const [expandedInquiryId, setExpandedInquiryId] = useState(null);
   const [selectedInquiryIds, setSelectedInquiryIds] = useState([]);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [bookingLead, setBookingLead] = useState(null);
 
   // Reschedule Modal state
   const [rescheduleItem, setRescheduleItem] = useState(null);
@@ -104,6 +138,9 @@ const AgentDashboard = () => {
   // Agent Acquisition Workflow State (Spec §2, §6, §7, §9)
   const [discoverProjectsList, setDiscoverProjectsList] = useState([]);
   const [discoverLoading, setDiscoverLoading] = useState(false);
+  const [discoverPage, setDiscoverPage] = useState(1);
+  const [discoverTotalPages, setDiscoverTotalPages] = useState(1);
+  const [discoverLoadingMore, setDiscoverLoadingMore] = useState(false);
   const [discoverSearch, setDiscoverSearch] = useState('');
   const [discoverCityFilter, setDiscoverCityFilter] = useState('all');
   const [discoverTypeFilter, setDiscoverTypeFilter] = useState('all');
@@ -145,9 +182,11 @@ const AgentDashboard = () => {
   const fetchDiscoverProjects = useCallback(async (isBackground = false) => {
     try {
       if (!isBackground) setDiscoverLoading(true);
-      const res = await discoverProjects();
+      const res = await discoverProjects({ page: 1, limit: 50 });
       if (res.success && Array.isArray(res.data)) {
         setDiscoverProjectsList(res.data);
+        setDiscoverPage(res.page || 1);
+        setDiscoverTotalPages(res.totalPages || 1);
       }
     } catch (error) {
       console.error('Failed to fetch discoverable projects:', error);
@@ -155,6 +194,24 @@ const AgentDashboard = () => {
       if (!isBackground) setDiscoverLoading(false);
     }
   }, []);
+
+  const loadMoreDiscoverProjects = async () => {
+    if (discoverLoadingMore || discoverPage >= discoverTotalPages) return;
+    setDiscoverLoadingMore(true);
+    try {
+      const nextPage = discoverPage + 1;
+      const res = await discoverProjects({ page: nextPage, limit: 50 });
+      if (res.success && Array.isArray(res.data)) {
+        setDiscoverProjectsList((current) => [...current, ...res.data]);
+        setDiscoverPage(res.page || nextPage);
+        setDiscoverTotalPages(res.totalPages || discoverTotalPages);
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || 'Could not load more projects.', 'error');
+    } finally {
+      setDiscoverLoadingMore(false);
+    }
+  };
 
   const fetchMyPartnerships = useCallback(async (isBackground = false) => {
     try {
@@ -312,7 +369,7 @@ const AgentDashboard = () => {
     setActionLoadingId(inquiryId);
     try {
       const res = await updateInquiryStatus(inquiryId, newStatus, {
-        lifecycleStage: newStatus,
+        lifecycleStage: newStatus === 'visit' ? 'site_visit_scheduled' : newStatus === 'closed' ? 'site_visit_done' : newStatus,
         notes: extraData.notes,
         visitDate: extraData.visitDate,
         visitTime: extraData.visitTime,
@@ -323,16 +380,16 @@ const AgentDashboard = () => {
           prev.map((inq) =>
             inq._id === inquiryId
               ? {
-                  ...inq,
-                  ...(res.data || {}),
-                  property:
-                    res.data?.property && typeof res.data.property === 'object'
-                      ? res.data.property
-                      : inq.property,
-                  status: newStatus,
-                  lifecycleStage: newStatus,
-                  ...extraData,
-                }
+                ...inq,
+                ...(res.data || {}),
+                property:
+                  res.data?.property && typeof res.data.property === 'object'
+                    ? res.data.property
+                    : inq.property,
+                status: newStatus,
+                lifecycleStage: res.data?.lifecycleStage || (newStatus === 'visit' ? 'site_visit_scheduled' : newStatus === 'closed' ? 'site_visit_done' : newStatus),
+                ...extraData,
+              }
               : inq
           )
         );
@@ -340,8 +397,8 @@ const AgentDashboard = () => {
           newStatus === 'closed'
             ? 'Site tour confirmed and marked completed!'
             : newStatus === 'visit'
-            ? 'Site visit updated and scheduled!'
-            : `Lead status updated to ${newStatus}`,
+              ? 'Site visit updated and scheduled!'
+              : `Lead status updated to ${newStatus}`,
           'success'
         );
       }
@@ -488,21 +545,21 @@ const AgentDashboard = () => {
   const closedCount = inquiries.filter((e) => e.status === 'closed').length;
   const rejectedCount = inquiries.filter((e) => e.status === 'rejected').length;
 
-  // Filtered Discover Projects (Spec §2)
+  // Filtered Discover Projects & Properties (Spec §2)
   const filteredDiscoverProjects = discoverProjectsList.filter((p) => {
     if (discoverSearch.trim()) {
       const q = discoverSearch.toLowerCase().trim();
       const title = (p.title || p.name || '').toLowerCase();
       const city = (p.location?.city || '').toLowerCase();
-      const builder = (p.builder?.companyName || p.builder?.name || '').toLowerCase();
-      if (!title.includes(q) && !city.includes(q) && !builder.includes(q)) return false;
+      const seller = (p.builder?.companyName || p.builder?.name || p.user?.companyName || p.user?.name || '').toLowerCase();
+      if (!title.includes(q) && !city.includes(q) && !seller.includes(q)) return false;
     }
     if (discoverCityFilter !== 'all') {
       const city = (p.location?.city || '').toLowerCase();
       if (city !== discoverCityFilter.toLowerCase()) return false;
     }
     if (discoverTypeFilter !== 'all') {
-      const type = (p.type || '').toLowerCase();
+      const type = (p.type || p.propertyType || '').toLowerCase();
       if (!type.includes(discoverTypeFilter.toLowerCase())) return false;
     }
     return true;
@@ -518,8 +575,8 @@ const AgentDashboard = () => {
     if (affiliationSearch.trim()) {
       const q = affiliationSearch.toLowerCase().trim();
       const title = (item.project?.title || item.project?.name || '').toLowerCase();
-      const builder = (item.project?.builder?.companyName || item.project?.builder?.name || '').toLowerCase();
-      if (!title.includes(q) && !builder.includes(q)) return false;
+      const seller = (item.project?.builder?.companyName || item.project?.builder?.name || item.builder?.companyName || item.builder?.name || '').toLowerCase();
+      if (!title.includes(q) && !seller.includes(q)) return false;
     }
     return true;
   });
@@ -540,14 +597,14 @@ const AgentDashboard = () => {
   const agencyName = user?.agentProfile?.agencyName || user?.name || 'Agent Console';
 
   return (
-    <div className="builder-wrapper">
+    <div className="builder-wrapper agent-wrapper">
       {/* SIDEBAR */}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="logo-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-              <polyline points="9 22 9 12 15 12 15 22"/>
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </div>
           <div>
@@ -563,7 +620,7 @@ const AgentDashboard = () => {
               className={`nav-item w-full text-left bg-transparent border-0 ${activeTab === 'overview' ? 'active' : ''}`}
               onClick={() => handleTabChange('overview')}
             >
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></svg>
               Dashboard
             </button>
           </div>
@@ -597,27 +654,23 @@ const AgentDashboard = () => {
           </div>
 
           <div className="nav-section">
-            <div className="nav-section-label">Project Acquisition</div>
+            <div className="nav-section-label">Acquisitions</div>
             <button
-              className={`nav-item w-full text-left bg-transparent border-0 flex items-center justify-between ${activeTab === 'find-projects' ? 'active' : ''}`}
+              className={`nav-item w-full text-left bg-transparent border-0 ${activeTab === 'find-projects' ? 'active' : ''}`}
               onClick={() => handleTabChange('find-projects')}
             >
-              <span className="flex items-center gap-2">
-                <Compass size={18} />
-                <span>Find Projects</span>
-              </span>
+              <Compass size={18} />
+              <span className="nav-text">Find Projects &amp; Properties</span>
               {discoverProjectsList.length > 0 && (
                 <span className="badge info">{discoverProjectsList.length}</span>
               )}
             </button>
             <button
-              className={`nav-item w-full text-left bg-transparent border-0 flex items-center justify-between ${activeTab === 'affiliations' ? 'active' : ''}`}
+              className={`nav-item w-full text-left bg-transparent border-0 ${activeTab === 'affiliations' ? 'active' : ''}`}
               onClick={() => handleTabChange('affiliations')}
             >
-              <span className="flex items-center gap-2">
-                <Award size={18} />
-                <span>My Affiliations</span>
-              </span>
+              <Award size={18} />
+              <span>My Affiliations</span>
               {affiliatedApprovedCount > 0 && (
                 <span className="badge success">{affiliatedApprovedCount}</span>
               )}
@@ -627,11 +680,11 @@ const AgentDashboard = () => {
           <div className="nav-section">
             <div className="nav-section-label">Account</div>
             <Link className="nav-item" to="/dashboard/profile">
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              Agency Profile
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+              Agent Profile
             </Link>
             <Link className="nav-item" to="/">
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" /></svg>
               Homepage
             </Link>
             <Link className="nav-item" to="/listings">
@@ -642,7 +695,7 @@ const AgentDashboard = () => {
               className="nav-item w-full text-left bg-transparent border-0"
               onClick={logout}
             >
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
               Sign Out
             </button>
           </div>
@@ -685,7 +738,7 @@ const AgentDashboard = () => {
             )}
             <button
               className="btn-primary flex items-center gap-2"
-              onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+              onClick={() => handleOpenAddProperty(null)}
             >
               <Plus size={16} /> Add Client Listing
             </button>
@@ -790,9 +843,8 @@ const AgentDashboard = () => {
                         return (
                           <div
                             key={lead._id}
-                            className={`py-2 px-2 rounded-lg transition-colors ${
-                              isSelected ? 'bg-blue-50/50' : isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50/70'
-                            }`}
+                            className={`py-2 px-2 rounded-lg transition-colors ${isSelected ? 'bg-blue-50/50' : isExpanded ? 'bg-slate-50' : 'hover:bg-slate-50/70'
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-3">
                               {/* Left: Checkbox + Avatar + Buyer & Listing Info */}
@@ -1042,7 +1094,7 @@ const AgentDashboard = () => {
 
                   <button
                     className="btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"
-                    onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+                    onClick={() => handleOpenAddProperty(null)}
                   >
                     <Plus size={14} /> Add Listing
                   </button>
@@ -1262,9 +1314,8 @@ const AgentDashboard = () => {
                             return (
                               <tr
                                 key={lead._id}
-                                className={`transition-colors ${
-                                  isSelected ? 'bg-blue-50/40' : 'hover:bg-slate-50/70'
-                                }`}
+                                className={`transition-colors ${isSelected ? 'bg-blue-50/40' : 'hover:bg-slate-50/70'
+                                  }`}
                               >
                                 <td className="py-3 px-3">
                                   <input
@@ -1323,17 +1374,16 @@ const AgentDashboard = () => {
                                 {/* Lead Status */}
                                 <td className="py-3 px-3 whitespace-nowrap">
                                   <span
-                                    className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold inline-flex items-center gap-1 ${
-                                      lead.status === 'closed'
-                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                        : lead.status === 'contacted'
+                                    className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold inline-flex items-center gap-1 ${lead.status === 'closed'
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      : lead.status === 'contacted'
                                         ? 'bg-blue-100 text-blue-800 border border-blue-200'
                                         : lead.status === 'visit'
-                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                        : lead.status === 'rejected'
-                                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                        : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                    }`}
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                          : lead.status === 'rejected'
+                                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                      }`}
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
                                     {lead.status === 'visit' ? 'Site Visit' : lead.status ? lead.status.charAt(0).toUpperCase() + lead.status.slice(1) : 'New'}
@@ -1346,6 +1396,15 @@ const AgentDashboard = () => {
 
                                 <td className="py-3 px-3 text-right whitespace-nowrap">
                                   <div className="flex items-center justify-end gap-2">
+                                    {lead.property?.category === 'project' && !lead.bookingRef && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setBookingLead(lead)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors"
+                                      >
+                                        Book unit
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -1410,16 +1469,14 @@ const AgentDashboard = () => {
                       return (
                         <div
                           key={visit._id}
-                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${
-                            isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
-                          }`}
+                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
+                            }`}
                         >
                           <div>
                             <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
                               <span
-                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${
-                                  isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                }`}
+                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}
                               >
                                 <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
                               </span>
@@ -1540,7 +1597,7 @@ const AgentDashboard = () => {
             </div>
           )}
 
-          {/* TAB 5: FIND PROJECTS (Spec §2) */}
+          {/* TAB 5: FIND PROJECTS & PROPERTIES (Spec §2) */}
           {activeTab === 'find-projects' && (
             <div className="section-card">
               <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -1552,7 +1609,7 @@ const AgentDashboard = () => {
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Discover projects open for agent acquisition. Apply for authorized selling rights to earn commissions and unlock client referral tracking.
+                    Discover builder projects open for agent representation. Apply for authorized selling rights to earn commissions and unlock client referral tracking.
                   </p>
                 </div>
 
@@ -1564,8 +1621,8 @@ const AgentDashboard = () => {
                       type="text"
                       value={discoverSearch}
                       onChange={(e) => setDiscoverSearch(e.target.value)}
-                      placeholder="Search project, city, builder..."
-                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-52"
+                      placeholder="Search title, city, seller..."
+                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
                     />
                   </div>
 
@@ -1589,11 +1646,11 @@ const AgentDashboard = () => {
                     onChange={(e) => setDiscoverTypeFilter(e.target.value)}
                     className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
                   >
-                    <option value="all">All Project Types</option>
-                    <option value="apartment">Apartment / Flats</option>
-                    <option value="villa">Villa / Bungalow</option>
+                    <option value="all">All Property Types</option>
+                    <option value="apartment">Apartment / Flat</option>
+                    <option value="villa">Villa / House</option>
                     <option value="commercial">Commercial</option>
-                    <option value="plot">Plots / Land</option>
+                    <option value="plot">Plot / Land</option>
                   </select>
                 </div>
               </div>
@@ -1602,49 +1659,51 @@ const AgentDashboard = () => {
                 {discoverLoading ? (
                   <div className="text-center py-12 text-slate-500 text-xs">
                     <span className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin inline-block mr-2" />
-                    Loading available partner developments...
+                    Loading available projects and properties...
                   </div>
                 ) : filteredDiscoverProjects.length === 0 ? (
                   <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
                     <Compass size={36} className="text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-bold text-slate-700">No partner-ready projects found</p>
+                    <p className="text-sm font-bold text-slate-700">No partner-ready listings found</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {discoverProjectsList.length === 0
-                        ? 'No builders have enabled agent acquisition yet. Check back soon for new project releases.'
-                        : 'No projects matched your search criteria. Try adjusting your filters.'}
+                        ? 'No sellers have enabled agent acquisition yet. Check back soon for new project releases.'
+                        : 'No listings matched your current filter criteria. Try adjusting your filters.'}
                     </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {filteredDiscoverProjects.map((project) => {
-                      const partnership = getProjectPartnership(project._id);
+                    {filteredDiscoverProjects.map((item) => {
+                      const isProject = (item.category || 'project') === 'project';
+                      const partnership = getProjectPartnership(item._id);
                       const isApproved = partnership?.status === 'approved' || partnership?.status === 'accepted';
                       const isPending = partnership?.status === 'pending';
                       const isRejected = partnership?.status === 'rejected';
-                      const builderName = project.builder?.companyName || project.builder?.name || 'Verified Developer';
-                      const img = project.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600';
-                      const commissionRate = project.defaultCommissionRate || 2.5;
+                      const sellerName = item.builder?.companyName || item.builder?.name || item.user?.companyName || item.user?.name || (isProject ? 'Verified Developer' : 'Property Owner');
+                      const img = item.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600';
+                      const commissionRate = item.defaultCommissionRate || 2.5;
 
                       return (
                         <div
-                          key={project._id}
+                          key={item._id}
                           className="border border-slate-200 rounded-2xl overflow-hidden bg-white hover:shadow-lg transition-all flex flex-col justify-between"
                         >
                           <div>
-                            {/* Project Image & Badges */}
+                            {/* Project/Property Image & Badges */}
                             <div className="h-44 w-full bg-slate-100 relative overflow-hidden group">
                               <img
                                 src={img}
-                                alt={project.title}
+                                alt={item.title}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                               />
                               <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 flex-wrap">
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-purple-700 text-white shadow-xs">
-                                  Project
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs ${isProject ? 'bg-purple-700' : 'bg-amber-600'
+                                  }`}>
+                                  {isProject ? 'Master Project' : 'Property'}
                                 </span>
-                                {project.statusLabel && (
+                                {item.statusLabel && (
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/90 text-slate-800 backdrop-blur-xs">
-                                    {project.statusLabel}
+                                    {item.statusLabel}
                                   </span>
                                 )}
                               </div>
@@ -1656,40 +1715,46 @@ const AgentDashboard = () => {
                               </div>
                             </div>
 
-                            {/* Project Info */}
+                            {/* Info */}
                             <div className="p-4">
                               <div className="text-[11px] font-bold uppercase tracking-wider text-blue-600 mb-1">
-                                {project.type || 'Residential Project'}
+                                {item.propertyType || item.type || (isProject ? 'Residential Project' : 'Property')}
                               </div>
 
-                              <h4 className="font-bold text-sm text-slate-900 mb-1 truncate" title={project.title}>
-                                {project.title}
+                              <h4 className="font-bold text-sm text-slate-900 mb-1 truncate" title={item.title}>
+                                {item.title}
                               </h4>
 
                               <div className="text-xs text-slate-600 font-medium mb-2 flex items-center gap-1.5">
                                 <Building2 size={13} className="text-slate-400 shrink-0" />
-                                <span className="truncate">{builderName}</span>
+                                <span className="truncate">{sellerName}</span>
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold shrink-0">
+                                  {isProject ? 'Developer' : 'Owner'}
+                                </span>
                               </div>
 
                               <p className="text-xs text-slate-500 mb-3 flex items-center gap-1">
                                 <MapPin size={12} className="text-slate-400 shrink-0" />
                                 <span className="truncate">
-                                  {project.location?.address ? `${project.location.address}, ` : ''}{project.location?.city}
+                                  {item.location?.address ? `${item.location.address}, ` : ''}{item.location?.city}
                                 </span>
                               </p>
 
-                              {/* Price & Units Specs */}
+                              {/* Price & Configuration Specs */}
                               <div className="grid grid-cols-2 gap-2 pt-2.5 border-t border-slate-100 text-xs">
                                 <div>
-                                  <span className="text-[10px] text-slate-400 block font-semibold">Starting Price</span>
+                                  <span className="text-[10px] text-slate-400 block font-semibold">{isProject ? 'Starting Price' : 'Asking Price'}</span>
                                   <span className="font-black text-slate-900 text-sm">
-                                    {project.priceDisplay || `₹ ${project.price?.toLocaleString()}`}
+                                    {item.priceDisplay || `₹ ${item.price?.toLocaleString()}`}
                                   </span>
                                 </div>
                                 <div className="text-right">
-                                  <span className="text-[10px] text-slate-400 block font-semibold">Available Units</span>
-                                  <span className="font-bold text-slate-700">
-                                    {project.unitsCount ? `${project.unitsCount} Units` : (project.bedrooms ? `${project.bedrooms} BHK Units` : 'Multi-Config')}
+                                  <span className="text-[10px] text-slate-400 block font-semibold">Configuration</span>
+                                  <span className="font-bold text-slate-700 truncate block">
+                                    {isProject
+                                      ? (item.unitsCount ? `${item.unitsCount} Units` : (item.bedrooms ? `${item.bedrooms} BHK Units` : 'Multi-Config'))
+                                      : `${item.bedrooms ? `${item.bedrooms} BHK · ` : ''}${item.area ? `${item.area} sqft` : (item.purpose ? item.purpose.toUpperCase() : 'Ready to Move')}`
+                                    }
                                   </span>
                                 </div>
                               </div>
@@ -1720,7 +1785,7 @@ const AgentDashboard = () => {
                               <div className="flex items-center gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => setRequestModalProject(project)}
+                                  onClick={() => setRequestModalProject(item)}
                                   className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer transition-colors"
                                 >
                                   <ShieldCheck size={13} />
@@ -1730,21 +1795,21 @@ const AgentDashboard = () => {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setRequestModalProject(project)}
+                                onClick={() => setRequestModalProject(item)}
                                 className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
                               >
                                 <ShieldCheck size={14} />
-                                <span>Request to Become Agent</span>
+                                <span>Request Selling Rights</span>
                               </button>
                             )}
 
                             <div className="flex items-center justify-between pt-1 text-[11px]">
                               <Link
-                                to={`/property/${project._id}`}
+                                to={`/property/${item._id}`}
                                 className="text-slate-600 hover:text-blue-600 font-semibold flex items-center gap-1"
                                 target="_blank"
                               >
-                                <ExternalLink size={12} /> View Full Project Details
+                                <ExternalLink size={12} /> View Full {isProject ? 'Project' : 'Property'} Details
                               </Link>
                               <span className="text-emerald-700 font-bold">
                                 Protected 30-Day Attribution
@@ -1754,6 +1819,18 @@ const AgentDashboard = () => {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+                {!discoverLoading && discoverPage < discoverTotalPages && (
+                  <div className="mt-6 text-center">
+                    <button
+                      type="button"
+                      onClick={loadMoreDiscoverProjects}
+                      disabled={discoverLoadingMore}
+                      className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-60"
+                    >
+                      {discoverLoadingMore ? 'Loading projects…' : 'Load more projects'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -1768,11 +1845,11 @@ const AgentDashboard = () => {
                   <div className="flex items-center gap-2">
                     <Award size={18} className="text-emerald-600" />
                     <h3 className="section-title !mb-0">
-                      My Project Affiliations &amp; Referral Links ({filteredAffiliations.length})
+                      My Affiliations &amp; Referral Links ({filteredAffiliations.length})
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">
-                    Manage all projects you are affiliated with. Share your unique client tracking URLs to automatically attribute leads and secure commissions.
+                    Manage all projects and properties you represent. Share your unique client tracking URLs to automatically attribute leads and secure commissions.
                   </p>
                 </div>
 
@@ -1783,7 +1860,7 @@ const AgentDashboard = () => {
                       type="text"
                       value={affiliationSearch}
                       onChange={(e) => setAffiliationSearch(e.target.value)}
-                      placeholder="Search affiliated projects..."
+                      placeholder="Search affiliated listings..."
                       className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-52"
                     />
                   </div>
@@ -1810,10 +1887,10 @@ const AgentDashboard = () => {
                 ) : filteredAffiliations.length === 0 ? (
                   <div className="text-center py-12 bg-slate-50 rounded-xl border border-dashed border-slate-300">
                     <Award size={36} className="text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-bold text-slate-700">No project affiliations found</p>
+                    <p className="text-sm font-bold text-slate-700">No affiliations found</p>
                     <p className="text-xs text-slate-500 mt-1 mb-4">
                       {myPartnerships.length === 0
-                        ? "You haven't applied to acquire any builder projects yet. Explore available developments to get authorized."
+                        ? "You haven't applied to represent any projects or properties yet. Explore available listings to get authorized."
                         : 'No affiliations match your current filter.'}
                     </p>
                     <button
@@ -1821,7 +1898,7 @@ const AgentDashboard = () => {
                       onClick={() => handleTabChange('find-projects')}
                       className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5"
                     >
-                      <Compass size={14} /> Find Projects to Represent
+                      <Compass size={14} /> Find Projects &amp; Properties to Represent
                     </button>
                   </div>
                 ) : (
@@ -1829,13 +1906,14 @@ const AgentDashboard = () => {
                     {filteredAffiliations.map((item) => {
                       const project = item.project || {};
                       const projId = project._id || project;
-                      const projectTitle = project.title || project.name || 'Development Project';
-                      const builderName = project.builder?.companyName || project.builder?.name || 'Verified Developer';
+                      const isProject = (project.category || 'project') === 'project';
+                      const projectTitle = project.title || project.name || (isProject ? 'Development Project' : 'Property Listing');
+                      const sellerName = project.builder?.companyName || project.builder?.name || item.builder?.companyName || item.builder?.name || (isProject ? 'Verified Developer' : 'Property Owner');
                       const img = project.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=300';
                       const isApproved = item.status === 'approved' || item.status === 'accepted';
                       const isPending = item.status === 'pending';
                       const isRejected = item.status === 'rejected';
-                      const affiliateCode = item.affiliateCode || user?.agentCode || user?._id;
+                      const affiliateCode = item.agentCode || user?.agentCode || user?._id;
                       const affiliateUrl = item.affiliateUrl || `${window.location.origin}/property/${projId}?agent=${affiliateCode}`;
                       const commissionRate = item.commissionRate || project.defaultCommissionRate || 2.5;
 
@@ -1844,7 +1922,7 @@ const AgentDashboard = () => {
                           key={item._id}
                           className="p-4 bg-white border border-slate-200 rounded-2xl shadow-xs hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
                         >
-                          {/* Left: Thumbnail & Project Meta */}
+                          {/* Left: Thumbnail & Project/Property Meta */}
                           <div className="flex items-start gap-3.5 min-w-0 flex-1">
                             <img
                               src={img}
@@ -1853,6 +1931,10 @@ const AgentDashboard = () => {
                             />
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase tracking-wide text-white ${isProject ? 'bg-purple-700' : 'bg-amber-600'
+                                  }`}>
+                                  {isProject ? 'Project' : 'Property'}
+                                </span>
                                 <h4 className="font-bold text-sm text-slate-900 truncate" title={projectTitle}>
                                   {projectTitle}
                                 </h4>
@@ -1863,18 +1945,21 @@ const AgentDashboard = () => {
                                 )}
                                 {isPending && (
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
-                                    <Clock size={11} /> Pending Approval
+                                    <Clock size={11} /> Pending Review
                                   </span>
                                 )}
                                 {isRejected && (
                                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
-                                    <X size={11} /> Request Rejected
+                                    <X size={11} /> Request Declined
                                   </span>
                                 )}
                               </div>
 
                               <div className="text-xs text-slate-600 flex items-center gap-2 mb-1">
-                                <span className="font-semibold text-slate-800">{builderName}</span>
+                                <span className="font-semibold text-slate-800">{sellerName}</span>
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-medium">
+                                  {isProject ? 'Developer' : 'Owner'}
+                                </span>
                                 {project.location?.city && (
                                   <span className="text-slate-400">· {project.location.city}</span>
                                 )}
@@ -1905,11 +1990,10 @@ const AgentDashboard = () => {
                                   <button
                                     type="button"
                                     onClick={() => handleCopyLink(affiliateCode, affiliateUrl, item._id)}
-                                    className={`shrink-0 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
-                                      copiedLinkMap[item._id]
-                                        ? 'bg-emerald-600 text-white'
-                                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                                    }`}
+                                    className={`shrink-0 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${copiedLinkMap[item._id]
+                                      ? 'bg-emerald-600 text-white'
+                                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                      }`}
                                   >
                                     {copiedLinkMap[item._id] ? <Check size={12} /> : <Copy size={12} />}
                                     <span>{copiedLinkMap[item._id] ? 'Copied!' : 'Copy Link'}</span>
@@ -1922,7 +2006,7 @@ const AgentDashboard = () => {
                                     rel="noreferrer"
                                     className="text-[11px] font-bold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
                                   >
-                                    <span>Open Project Page</span>
+                                    <span>Open {isProject ? 'Project' : 'Property'} Page</span>
                                     <ExternalLink size={11} />
                                   </a>
                                   <span className="text-[10px] text-slate-400">
@@ -1937,7 +2021,7 @@ const AgentDashboard = () => {
                                   <span>Application Pending Review</span>
                                 </div>
                                 <p className="text-[11px] text-amber-800 leading-relaxed">
-                                  The builder has been notified. As soon as they accept your request, your unique tracking URL will activate here.
+                                  The seller has been notified. As soon as they accept your request, your unique tracking URL will activate here.
                                 </p>
                               </div>
                             ) : (
@@ -1948,8 +2032,8 @@ const AgentDashboard = () => {
                                 </div>
                                 <p className="text-[11px] text-rose-800 leading-relaxed">
                                   {item.rejectionReason
-                                    ? `Builder note: "${item.rejectionReason}".`
-                                    : 'The developer declined this request. You can re-apply.'}
+                                    ? `Seller note: "${item.rejectionReason}".`
+                                    : 'The seller declined this request. You can re-apply.'}
                                 </p>
                                 <button
                                   type="button"
@@ -2156,52 +2240,92 @@ const AgentDashboard = () => {
       )}
 
       {/* Add / Edit Property Modal */}
-      <AddPropertyModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-        }}
-        onSuccess={() => {
-          setIsModalOpen(false);
-          setEditProperty(null);
-          broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
-          fetchProperties();
-        }}
-        initialData={editProperty}
-      />
+      {isModalOpen && (
+        <Suspense fallback={null}>
+          <AddPropertyModal
+            isOpen={isModalOpen}
+            onClose={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+            }}
+            onSuccess={() => {
+              setIsModalOpen(false);
+              setEditProperty(null);
+              broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'saved' });
+              fetchProperties();
+            }}
+            initialData={editProperty}
+          />
+        </Suspense>
+      )}
+
+      {/* Mandatory KYC Verification Modal for Agent */}
+      {showKycModal && (
+        <Suspense fallback={null}>
+          <KycVerificationModal
+            isOpen={showKycModal}
+            onClose={() => setShowKycModal(false)}
+            user={user}
+            showToast={showToast}
+            onVerificationSubmitted={(kycData) => {
+              if (user) {
+                user.kycVerification = kycData;
+              }
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* ── 1. Request Selling Rights Modal for Agents (Spec §3) ── */}
-      <RequestSellingRightsModal
-        isOpen={Boolean(requestModalProject)}
-        project={requestModalProject}
-        showToast={showToast}
-        onClose={() => setRequestModalProject(null)}
-        onSuccess={() => {
-          setRequestModalProject(null);
-          fetchMyPartnerships(true);
-          fetchDiscoverProjects(true);
-          if (showToast) showToast('Acquisition request submitted to builder!', 'success');
-        }}
-      />
+      {bookingLead && (
+        <Suspense fallback={null}>
+          <BookUnitModal
+            isOpen={!!bookingLead}
+            lead={bookingLead}
+            showToast={showToast}
+            onClose={() => setBookingLead(null)}
+            onSuccess={() => {
+              setInquiries((items) => items.map((item) => item._id === bookingLead?._id
+                ? { ...item, lifecycleStage: 'unit_booked', bookingRef: true }
+                : item));
+              setBookingLead(null);
+            }}
+          />
+        </Suspense>
+      )}
+
+      {Boolean(requestModalProject) && (
+        <Suspense fallback={null}>
+          <RequestSellingRightsModal
+            isOpen={Boolean(requestModalProject)}
+            project={requestModalProject}
+            showToast={showToast}
+            onClose={() => setRequestModalProject(null)}
+            onSuccess={() => {
+              setRequestModalProject(null);
+              fetchMyPartnerships(true);
+              fetchDiscoverProjects(true);
+              if (showToast) showToast('Acquisition request submitted to builder!', 'success');
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* ── 2. Real-Time Acquisition Status Notification Window (Spec §9) ── */}
       {statusNotificationModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-left relative overflow-hidden">
-            <div className={`h-1.5 absolute top-0 left-0 right-0 ${
-              statusNotificationModal.status === 'approved' || statusNotificationModal.status === 'accepted'
-                ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600'
-                : 'bg-gradient-to-r from-rose-500 via-red-500 to-rose-600'
-            }`} />
+            <div className={`h-1.5 absolute top-0 left-0 right-0 ${statusNotificationModal.status === 'approved' || statusNotificationModal.status === 'accepted'
+              ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600'
+              : 'bg-gradient-to-r from-rose-500 via-red-500 to-rose-600'
+              }`} />
 
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div className="flex items-center gap-2">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-                  statusNotificationModal.status === 'approved' || statusNotificationModal.status === 'accepted'
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-rose-100 text-rose-700'
-                }`}>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${statusNotificationModal.status === 'approved' || statusNotificationModal.status === 'accepted'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-rose-100 text-rose-700'
+                  }`}>
                   {statusNotificationModal.status === 'approved' || statusNotificationModal.status === 'accepted' ? (
                     <Award size={20} />
                   ) : (

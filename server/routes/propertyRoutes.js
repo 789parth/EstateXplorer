@@ -3,6 +3,7 @@ const {
   createProperty,
   getProperties,
   getProperty,
+  recordPropertyAttribution,
   getFeatured,
   getMyProperties,
   updateProperty,
@@ -28,6 +29,7 @@ router
   .post(protect, createProperty);
 
 router.get('/featured', cacheMiddleware('properties:featured', 60), getFeatured);
+router.get('/:id/attribution', recordPropertyAttribution);
 
 router.get('/mine', protect, getMyProperties);
 
@@ -49,8 +51,8 @@ router
   .patch(protect, updateProperty)
   .delete(protect, deleteProperty);
 
-// Inquiry submission requires user to be logged in
-router.post('/:id/inquiry', protect, submitInquiry);
+// Inquiry submission: allow both authenticated and guest users (controller handles both)
+router.post('/:id/inquiry', optionalAuth, submitInquiry);
 
 module.exports = router;
 

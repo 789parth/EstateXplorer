@@ -34,4 +34,5 @@ const CityGrid = () => {
   );
 };
 
-export default CityGrid;
+export default React.memo(CityGrid);
+

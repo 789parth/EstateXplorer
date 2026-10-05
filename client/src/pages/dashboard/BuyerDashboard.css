@@ -117,10 +117,24 @@
   min-width:20px;
   text-align:center;
 }
+.dashboard-wrapper .nav-item .badge.warning {
+  background:#f59e0b;
+  color:#fff;
+}
+.dashboard-wrapper .nav-item .badge.info {
+  background:#3b82f6;
+  color:#fff;
+}
+.dashboard-wrapper .nav-item .badge.success {
+  background:#10b981;
+  color:#fff;
+}
 
 .dashboard-wrapper .sidebar-footer {
   padding:16px;
   border-top:1px solid rgba(255,255,255,.08);
+  margin-top:auto;
+  flex-shrink:0;
 }
 .dashboard-wrapper .user-profile {
   display:flex;

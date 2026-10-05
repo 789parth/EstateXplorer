@@ -328,11 +328,11 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         )
       )}
 
-      {/* Role selector */}
+      {/* Role Selection */}
       <RoleSelect
         selectedRole={selectedRole}
         onSelectRole={setSelectedRole}
-        title="Select Your Account Role"
+        title="Select Role to Sign Up As"
       />
 
       {/* Google Sign-Up */}
@@ -366,6 +366,7 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         <Input
           label="Full Name"
           type="text"
+          required
           placeholder="Priya Sharma"
           icon={User}
           error={errors.name?.message}
@@ -378,6 +379,7 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         <Input
           label="Email Address"
           type="email"
+          required
           placeholder="priya@example.com"
           icon={Mail}
           error={errors.email?.message}
@@ -393,6 +395,7 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         <Input
           label="Phone Number"
           type="tel"
+          required
           placeholder="9876543210"
           icon={Phone}
           error={errors.phone?.message}
@@ -413,6 +416,7 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
           <Input
             label="Password"
             type="password"
+            required
             placeholder="••••••••"
             icon={Lock}
             error={errors.password?.message}
@@ -492,6 +496,7 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         <Input
           label="Confirm Password"
           type="password"
+          required
           placeholder="••••••••"
           icon={Lock}
           error={errors.confirmPassword?.message}

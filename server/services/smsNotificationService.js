@@ -1,7 +1,16 @@
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 const NotificationLog = require('../models/NotificationLog');
 const User = require('../models/User');
+
+function hashPhoneOtp(phone, code) {
+  const secret = process.env.OTP_HASH_SECRET || process.env.JWT_ACCESS_SECRET;
+  if (!secret || secret.length < 32) throw new Error('A strong OTP_HASH_SECRET is required for phone verification.');
+  return crypto.createHmac('sha256', secret)
+    .update(`${String(phone).toLowerCase()}|phone_verify|${String(code).trim()}`)
+    .digest('hex');
+}
 
 /**
  * Normalizes phone numbers to standard 10-digit Indian mobile format
@@ -294,7 +303,6 @@ async function notifySellerOnNewLead({ sellerUser, inquiry, property }) {
 
   const propTitle = property?.title || inquiry?.propertyTitle || 'Your Property Listing';
   const buyerName = inquiry?.name || 'A buyer';
-  const buyerPhone = inquiry?.phone || 'Phone on request';
 
   let smsText = '';
   let type = 'LEAD_ALERT';
@@ -303,9 +311,9 @@ async function notifySellerOnNewLead({ sellerUser, inquiry, property }) {
     type = 'SITE_VISIT_BOOKED';
     const dateStr = inquiry.visitDate ? ` on ${inquiry.visitDate}` : '';
     const timeStr = inquiry.visitTime ? ` at ${inquiry.visitTime}` : '';
-    smsText = `[EstateXplorer] New Site Visit booked by ${buyerName} for "${propTitle}"${dateStr}${timeStr}. Buyer Contact: ${buyerPhone}. Review booking details in your portal: ${process.env.CLIENT_URL || 'https://estatexplorer.com'}/dashboard`;
+    smsText = `[EstateXplorer] New Site Visit booked by ${buyerName} for "${propTitle}"${dateStr}${timeStr}. Review booking details in your portal: ${process.env.CLIENT_URL || 'https://estatexplorer.com'}/dashboard`;
   } else {
-    smsText = `[EstateXplorer] New Inquiry from ${buyerName} for "${propTitle}". Buyer Contact: ${buyerPhone}. Review and respond in your portal: ${process.env.CLIENT_URL || 'https://estatexplorer.com'}/dashboard`;
+    smsText = `[EstateXplorer] New Inquiry from ${buyerName} for "${propTitle}". Review and respond in your portal: ${process.env.CLIENT_URL || 'https://estatexplorer.com'}/dashboard`;
   }
 
   return await sendSmsGateway({
@@ -440,18 +448,17 @@ async function sendTwilioPhoneOtp({ phone }) {
 
   // 2. Fallback: Generate local 6-digit OTP and store in OTP collection
   const OTP = require('../models/OTP');
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = String(crypto.randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   await OTP.deleteMany({ phone: cleanPhone, purpose: 'phone_verify' });
   await OTP.create({
     phone: cleanPhone,
-    code,
+    code: hashPhoneOtp(cleanPhone, code),
     purpose: 'phone_verify',
     expiresAt,
   });
 
-  console.log(`📱 Generated Mobile Verification OTP for +91-${cleanPhone}: ${code}`);
 
   // Dispatch via gateway SMS
   await sendSmsGateway({
@@ -530,8 +537,6 @@ async function verifyTwilioPhoneOtp({ phone, code }) {
         parsed = { raw: response.body };
       }
 
-      console.log(`[Twilio VerifyCheck] Response code: ${response.statusCode}, body: ${response.body}`);
-
       if (response.statusCode >= 200 && response.statusCode < 300 && (parsed.status === 'approved' || parsed.valid === true)) {
         return {
           success: true,
@@ -548,7 +553,7 @@ async function verifyTwilioPhoneOtp({ phone, code }) {
   const OTP = require('../models/OTP');
   const otpRecord = await OTP.findOne({
     phone: cleanPhone,
-    code: cleanCode,
+    code: hashPhoneOtp(cleanPhone, cleanCode),
     purpose: 'phone_verify',
     expiresAt: { $gt: new Date() },
   });

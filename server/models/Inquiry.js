@@ -170,5 +170,7 @@ inquirySchema.index({ status: 1 });
 inquirySchema.index({ lifecycleStage: 1 });
 inquirySchema.index({ isAttributed: 1 });
 inquirySchema.index({ expiresAt: 1 });
+// Compound index for auto-reject job: filters on status IN [...] and createdAt <= threshold
+inquirySchema.index({ status: 1, createdAt: 1 });
 
 module.exports = mongoose.model('Inquiry', inquirySchema);

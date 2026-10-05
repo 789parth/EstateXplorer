@@ -1,5 +1,13 @@
 const jwt = require('jsonwebtoken');
 
+const requireSecret = (name) => {
+  const secret = process.env[name];
+  if (!secret || secret.length < 32) {
+    throw new Error(`${name} must be configured with at least 32 characters.`);
+  }
+  return secret;
+};
+
 const generateAccessToken = (user) => {
   return jwt.sign(
     {
@@ -8,7 +16,7 @@ const generateAccessToken = (user) => {
       roles: user.roles || [user.role || 'buyer'],
       email: user.email,
     },
-    process.env.JWT_ACCESS_SECRET || 'estatexplorer_access_secret',
+    requireSecret('JWT_ACCESS_SECRET'),
     { expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m' }
   );
 };
@@ -16,7 +24,7 @@ const generateAccessToken = (user) => {
 const generateRefreshToken = (user) => {
   return jwt.sign(
     { id: user._id || user.id },
-    process.env.JWT_REFRESH_SECRET || 'estatexplorer_refresh_secret',
+    requireSecret('JWT_REFRESH_SECRET'),
     { expiresIn: process.env.JWT_REFRESH_EXPIRES || '7d' }
   );
 };
@@ -52,6 +60,7 @@ const sendTokenResponse = (user, statusCode, res, message = 'Success') => {
     builderProfile: user.builderProfile,
     agentProfile: user.agentProfile,
     ownerProfile: user.ownerProfile,
+    kycVerification: user.kycVerification || { status: 'unverified' },
     createdAt: user.createdAt,
   };
 

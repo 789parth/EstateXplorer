@@ -7,6 +7,8 @@ import { formatPrice } from '../../utils/formatters';
 const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
   const [units, setUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
+  const [unitPage, setUnitPage] = useState(1);
+  const [unitTotalPages, setUnitTotalPages] = useState(1);
   const [selectedUnitId, setSelectedUnitId] = useState('');
   const [agreementValue, setAgreementValue] = useState('');
   const [tokenAmount, setTokenAmount] = useState('50000');
@@ -24,16 +26,20 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
       setSelectedUnitId('');
       setAgreementValue('');
       setError('');
+      setUnitPage(1);
       return;
     }
 
     const fetchUnits = async () => {
       setLoadingUnits(true);
       setError('');
+      setUnits([]);
+      setSelectedUnitId('');
       try {
-        const res = await getProjectUnits(projectId, { status: 'available' });
+        const res = await getProjectUnits(projectId, { status: 'available', page: unitPage, limit: 50 });
         if (res.success) {
           setUnits(res.data || []);
+          setUnitTotalPages(res.totalPages || 1);
           if (res.data && res.data.length > 0) {
             setSelectedUnitId(res.data[0]._id);
             setAgreementValue(String(res.data[0].price || lead?.property?.price || 5000000));
@@ -47,7 +53,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
     };
 
     fetchUnits();
-  }, [isOpen, projectId]);
+  }, [isOpen, projectId, unitPage]);
 
   if (!isOpen || !lead) return null;
 
@@ -114,7 +120,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">Book Inventory Unit</h3>
-              <p className="text-xs text-slate-500">Atomic concurrency-safe unit locking & commission settlement</p>
+              <p className="text-xs text-slate-500">Choose an available unit. Inventory is reserved atomically when the booking is saved.</p>
             </div>
           </div>
           <button
@@ -170,8 +176,9 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
               <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                 No units currently available for this project. Please create units in Project Units Inventory.
               </div>
-            ) : (
-              <select
+        ) : (
+          <>
+            <select
                 value={selectedUnitId}
                 onChange={(e) => handleUnitChange(e.target.value)}
                 required
@@ -182,7 +189,15 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
                     {u.tower} - Flat {u.unitNumber} (Floor {u.floor}) · {u.bhk} BHK · {u.carpetArea} sq.ft · {formatPrice(u.price)}
                   </option>
                 ))}
-              </select>
+            </select>
+            {unitTotalPages > 1 && (
+              <div className="mt-2 flex items-center justify-between text-xs text-slate-600">
+                <button type="button" disabled={unitPage <= 1 || loadingUnits} onClick={() => setUnitPage((page) => page - 1)} className="rounded border px-2 py-1 disabled:opacity-50">Previous units</button>
+                <span>Page {unitPage} of {unitTotalPages}</span>
+                <button type="button" disabled={unitPage >= unitTotalPages || loadingUnits} onClick={() => setUnitPage((page) => page + 1)} className="rounded border px-2 py-1 disabled:opacity-50">Next units</button>
+              </div>
+            )}
+          </>
             )}
           </div>
 

@@ -19,7 +19,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
       const res = await requestPartnership(project._id, message.trim());
       if (res.success) {
         broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, { action: 'requested', projectId: project._id });
-        if (showToast) showToast('Selling rights application submitted to builder!', 'success');
+        if (showToast) showToast('Selling rights application submitted to seller!', 'success');
         onSuccess(res.data);
         onClose();
       }
@@ -42,7 +42,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">Request Authorized Selling Rights</h3>
-              <p className="text-xs text-slate-500">Apply for exclusive Channel Partner selling rights & tracking URL</p>
+              <p className="text-xs text-slate-500">Apply to represent this {project.category === 'project' ? 'development project' : 'property'} &amp; unlock tracking URL</p>
             </div>
           </div>
           <button
@@ -66,7 +66,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
             <span>{project.title}</span>
           </div>
           <div className="text-slate-600">
-            <strong>Developer:</strong> {project.builder?.companyName || project.builder?.name || 'Verified Developer'}
+            <strong>{project.category === 'project' ? 'Developer' : 'Seller / Owner'}:</strong> {project.builder?.companyName || project.builder?.name || project.user?.name || (project.category === 'project' ? 'Verified Developer' : 'Direct Owner')}
           </div>
           <div className="text-slate-600">
             <strong>Location:</strong> {typeof project.location === 'string' ? project.location : `${project.location?.address || ''}, ${project.location?.city || ''}`}
@@ -86,7 +86,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
               rows="3"
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="e.g., We have an active portfolio of 25+ verified NRI & local buyers actively searching for 2/3 BHK units in this micro-market."
+              placeholder="e.g., We have an active portfolio of 25+ verified buyers actively searching for units in this micro-market."
               className="w-full p-2.5 rounded-lg border border-slate-300 text-xs text-slate-800 focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -94,7 +94,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
           <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg text-[0.72rem] text-blue-900 space-y-1">
             <strong>Enterprise CP Protection Notice:</strong>
             <p>
-              Upon builder approval, you will receive a unique tracking code (<code>CP-XXXXXX</code>) and dedicated affiliate link.
+              Upon approval, you will receive a unique tracking code (<code>CP-XXXXXX</code>) and dedicated affiliate link.
               All buyer traffic referred through your link is protected by a 30-day First-Touch Attribution window with guaranteed 2-way data privacy.
             </p>
           </div>

@@ -44,15 +44,19 @@ const Navbar = ({ onOpenLogin, onOpenRegister, solid = false }) => {
         setActiveSection('home');
       }
 
+      let ticking = false;
       const handleScroll = () => {
-        if (window.scrollY > 40) {
-          setScrolled(true);
-        } else {
-          setScrolled(false);
+        if (!ticking) {
+          window.requestAnimationFrame(() => {
+            const isScrolled = window.scrollY > 40;
+            setScrolled((prev) => (prev !== isScrolled ? isScrolled : prev));
+            ticking = false;
+          });
+          ticking = true;
         }
       };
 
-      window.addEventListener('scroll', handleScroll);
+      window.addEventListener('scroll', handleScroll, { passive: true });
       return () => window.removeEventListener('scroll', handleScroll);
     } else {
       if (pathname.startsWith('/listings') || pathname.startsWith('/property/')) {
@@ -251,4 +255,5 @@ const Navbar = ({ onOpenLogin, onOpenRegister, solid = false }) => {
   );
 };
 
-export default Navbar;
+export default React.memo(Navbar);
+

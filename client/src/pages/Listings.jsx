@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { X, Search, Share2, Check, Building2, Layers, Plus } from 'lucide-react';
 import { getProperties, getUserWishlist, toggleWishlistApi } from '../services/propertyService';
@@ -8,11 +8,14 @@ import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import Modal from '../components/common/Modal';
 import ShareModal from '../components/common/ShareModal';
-import LoginForm from '../components/auth/LoginForm';
-import RegisterForm from '../components/auth/RegisterForm';
-import ForgotForm from '../components/auth/ForgotForm';
 import { formatPrice, getPublicImageUrl, isVideoUrl } from '../utils/formatters';
 import './Listings.css';
+
+// Auth forms only appear in modals — lazy-load to keep Listings initial bundle lean
+const LoginForm = lazy(() => import('../components/auth/LoginForm'));
+const RegisterForm = lazy(() => import('../components/auth/RegisterForm'));
+const ForgotForm = lazy(() => import('../components/auth/ForgotForm'));
+const AUTH_MODAL_FALLBACK = <div className="py-8 text-center text-slate-400 text-sm">Loading…</div>;
 
 /**
  * Parses user typed budget input like "25L", "1.5 Cr", "50 Lakhs", "2000000" into raw numeric value.
@@ -60,11 +63,57 @@ const formatBudgetDisplay = (num) => {
   return String(val);
 };
 
+const mapListingProperty = (p) => {
+  const rawImages = Array.isArray(p.images) && p.images.length > 0
+    ? p.images
+    : (p.image ? [p.image] : (p.img ? [p.img] : []));
+  const validImages = rawImages
+    .filter((img) => typeof img === 'string' && img.trim() !== '')
+    .map((img) => getPublicImageUrl(img));
+  const mainImg = validImages[0] || getPublicImageUrl(p.image || p.img);
+  const videoCount = validImages.filter(isVideoUrl).length;
+  const photoCount = validImages.length > 0 ? Math.max(0, validImages.length - videoCount) : 1;
+  const locStr = typeof p.location === 'string' ? p.location : `${p.location?.address || ''}, ${p.location?.city || ''}`;
+
+  return {
+    ...p,
+    id: p._id,
+    type: p.type || (p.bhk ? `${p.bhk} BHK Apartment` : 'Apartment'),
+    amenities: Array.isArray(p.amenities) ? p.amenities : [],
+    builder: p.builder,
+    postedByRole: p.postedByRole || (typeof p.builder === 'object' ? p.builder?.role : '') || (p.category === 'project' ? 'builder' : 'owner'),
+    description: p.description || '',
+    area: p.area || 0,
+    createdAt: p.createdAt,
+    price: p.price,
+    purpose: p.purpose || 'buy',
+    bhk: p.bhk || 0,
+    status: p.status,
+    rera: p.rera,
+    name: p.title,
+    category: p.category || 'property',
+    location: locStr,
+    city: typeof p.location === 'object' ? p.location?.city : '',
+    priceDisplay: formatPrice(p.price, p.priceDisplay, p.purpose),
+    priceSub: p.priceSub || (p.price > 0 && p.area > 0 ? `₹ ${Math.round(p.price / p.area).toLocaleString('en-IN')} / Sq.Ft` : ''),
+    photos: photoCount,
+    videos: videoCount,
+    images: validImages.length > 0 ? validImages : [mainImg],
+    usps: p.usps || [],
+    statusLabel: p.statusLabel || (p.status === 'ready' ? 'Ready To Move' : 'Under Construction'),
+    statusDate: p.statusDate,
+    ready: p.status === 'ready',
+    img: mainImg,
+  };
+};
+
 const Listings = ({ projectOnly = false }) => {
   const { user, showToast } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [properties, setProperties] = useState([]); // 100% live database properties
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authModalState, setAuthModalState] = useState(null); // 'login' | 'register' | 'forgot' | null
   const [authModalEmail, setAuthModalEmail] = useState('');
@@ -75,54 +124,10 @@ const Listings = ({ projectOnly = false }) => {
       if (!isBackground) {
         setLoading(true);
       }
-      const res = await getProperties();
+      const res = await getProperties({ page: 1, limit: 100 }, { useCache: !isBackground });
       if (res.success && Array.isArray(res.data)) {
-        // Map backend properties to frontend format
-        const mappedProperties = res.data.map(p => {
-          const rawImages = Array.isArray(p.images) && p.images.length > 0
-            ? p.images
-            : (p.image ? [p.image] : (p.img ? [p.img] : []));
-          const validImages = rawImages
-            .filter(img => typeof img === 'string' && img.trim() !== '')
-            .map(img => getPublicImageUrl(img));
-          const mainImg = validImages[0] || getPublicImageUrl(p.image || p.img);
-          const videoCount = validImages.filter(img => isVideoUrl(img)).length;
-          const photoCount = validImages.length > 0 ? Math.max(0, validImages.length - videoCount) : 1;
-          const locStr = typeof p.location === 'string' ? p.location : `${p.location?.address || ''}, ${p.location?.city || ''}`;
-
-          return {
-            ...p,
-            id: p._id,
-            type: p.type || (p.bhk ? `${p.bhk} BHK Apartment` : 'Apartment'),
-            amenities: Array.isArray(p.amenities) ? p.amenities : [],
-            builder: p.builder,
-            postedByRole: p.postedByRole || (typeof p.builder === 'object' ? p.builder?.role : '') || (p.category === 'project' ? 'builder' : 'owner'),
-            description: p.description || '',
-            area: p.area || 0,
-            createdAt: p.createdAt,
-            price: p.price,
-            purpose: p.purpose || 'buy',
-            bhk: p.bhk || 0,
-            status: p.status,
-            rera: p.rera,
-            name: p.title,
-            category: p.category || 'property',
-            location: locStr,
-            city: typeof p.location === 'object' ? p.location?.city : '',
-            priceDisplay: formatPrice(p.price, p.priceDisplay, p.purpose),
-            priceSub: p.priceSub || (p.price > 0 && p.area > 0 ? `₹ ${Math.round(p.price / p.area).toLocaleString('en-IN')} / Sq.Ft` : ''),
-            photos: photoCount,
-            videos: videoCount,
-            images: validImages.length > 0 ? validImages : [mainImg],
-            usps: p.usps || [],
-            statusLabel: p.statusLabel || (p.status === 'ready' ? 'Ready To Move' : 'Under Construction'),
-            statusDate: p.statusDate,
-            ready: p.status === 'ready',
-            img: mainImg,
-          };
-        });
-
-        setProperties(mappedProperties);
+        setProperties(res.data.map(mapListingProperty));
+        setPagination({ page: res.page || 1, totalPages: res.totalPages || 1, total: res.total || res.count || 0 });
       }
     } catch (err) {
       console.error('Failed to fetch live database properties:', err);
@@ -133,6 +138,29 @@ const Listings = ({ projectOnly = false }) => {
     }
   }, []);
 
+  const loadNextPage = async () => {
+    if (loadingMore || pagination.page >= pagination.totalPages) return;
+    setLoadingMore(true);
+    try {
+      const nextPage = pagination.page + 1;
+      const res = await getProperties({ page: nextPage, limit: 100 }, { useCache: false });
+      if (res.success && Array.isArray(res.data)) {
+        setProperties((current) => [...current, ...res.data.map(mapListingProperty)]);
+        setPagination({ page: res.page || nextPage, totalPages: res.totalPages || pagination.totalPages, total: res.total || pagination.total });
+        setVisibleCount((current) => current + 6);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Could not load more listings.', 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleLoadMore = () => {
+    if (visibleCount < filtered.length) setVisibleCount((current) => current + 6);
+    else loadNextPage();
+  };
+
   useEffect(() => {
     fetchProperties(false);
   }, [fetchProperties]);
@@ -140,7 +168,12 @@ const Listings = ({ projectOnly = false }) => {
   const [activeChip, setActiveChip] = useState('all');
   const [sortBy, setSortBy] = useState('relevance');
   const [reraOnly, setReraOnly] = useState(false);
+  // searchInput: drives the visual input field immediately (no lag)
+  // locationSearch: drives the filter useMemo — debounced 200ms to avoid
+  // re-running the expensive filter pipeline on every single keystroke
+  const [searchInput, setSearchInput] = useState('');
   const [locationSearch, setLocationSearch] = useState('');
+  const searchDebounceRef = useRef(null);
   const [selectedState, setSelectedState] = useState('');
   const [selectedCities, setSelectedCities] = useState([]);
   const [selectedLocalities, setSelectedLocalities] = useState([]);
@@ -172,8 +205,8 @@ const Listings = ({ projectOnly = false }) => {
     const status = searchParams.get('status');
     const purpose = searchParams.get('purpose');
 
-    if (loc) setLocationSearch(loc);
-    else setLocationSearch('');
+    if (loc) { setSearchInput(loc); setLocationSearch(loc); }
+    else { setSearchInput(''); setLocationSearch(''); }
 
     if (state) setSelectedState(state);
     else setSelectedState('');
@@ -283,6 +316,18 @@ const Listings = ({ projectOnly = false }) => {
     syncWishlist();
   }, [syncWishlist]);
 
+  // Debounce search input: update the filter state 200ms after user stops typing.
+  // Prevents re-running the full filter pipeline on every keystroke.
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      setLocationSearch(searchInput);
+    }, 200);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchInput]);
+
   // Real-time synchronization for inventory and cross-tab wishlist changes (silent background updates)
   useRealtimeSync(
     [SYNC_EVENTS.WISHLIST, SYNC_EVENTS.PROPERTIES],
@@ -290,13 +335,16 @@ const Listings = ({ projectOnly = false }) => {
       syncWishlist();
       fetchProperties(true);
     },
-    { revalidateOnFocus: true, intervalMs: 15000 }
+    { revalidateOnFocus: true, intervalMs: 30000 }
   );
+
+  // Derived O(1) lookup set — avoids O(n) .some() inside every filter pass
+  const likedSet = useMemo(() => new Set(likedIds.map(String)), [likedIds]);
 
   // Real valid saved count from loaded properties
   const savedCount = useMemo(() => {
-    return properties.filter(p => likedIds.some(id => String(id) === String(p.id))).length;
-  }, [properties, likedIds]);
+    return properties.filter(p => likedSet.has(String(p.id))).length;
+  }, [properties, likedSet]);
 
   // Helper to determine who posted the property/project
   const getPropertyPosterRole = useCallback((p) => {
@@ -467,8 +515,8 @@ const Listings = ({ projectOnly = false }) => {
       return;
     }
 
-    const nextState = !likedIds.includes(id);
-    const updated = likedIds.includes(id) ? likedIds.filter(v => v !== id) : [...likedIds, id];
+    const nextState = !likedSet.has(String(id));
+    const updated = likedSet.has(String(id)) ? likedIds.filter(v => v !== id) : [...likedIds, id];
     setLikedIds(updated);
     localStorage.setItem('wishlist', JSON.stringify(updated));
 
@@ -486,6 +534,7 @@ const Listings = ({ projectOnly = false }) => {
 
   const clearFilters = () => {
     setReraOnly(false);
+    setSearchInput('');
     setLocationSearch('');
     setSelectedState('');
     setSelectedCities([]);
@@ -510,7 +559,7 @@ const Listings = ({ projectOnly = false }) => {
   // Active filter tags for quick pill dismissals
   const activeFilterTags = useMemo(() => {
     const tags = [];
-    if (locationSearch.trim()) tags.push({ label: `Search: "${locationSearch}"`, clear: () => setLocationSearch('') });
+    if (locationSearch.trim()) tags.push({ label: `Search: "${locationSearch}"`, clear: () => { setSearchInput(''); setLocationSearch(''); } });
     if (selectedState) tags.push({ label: `State: ${selectedState}`, clear: () => setSelectedState('') });
     selectedCities.forEach(c => tags.push({ label: `City: ${c.charAt(0).toUpperCase() + c.slice(1)}`, clear: () => toggleCity(c) }));
     selectedLocalities.forEach(l => tags.push({ label: `Locality: ${l}`, clear: () => toggleLocality(l) }));
@@ -641,7 +690,7 @@ const Listings = ({ projectOnly = false }) => {
       );
     }
     // Quick chip filters
-    if (activeChip === 'wishlist') list = list.filter(p => likedIds.some(id => String(id) === String(p.id)));
+    if (activeChip === 'wishlist') list = list.filter(p => likedSet.has(String(p.id)));
     if (activeChip === 'rera') list = list.filter(p => p.rera);
     if (activeChip === 'ready') list = list.filter(p => p.status === 'ready');
     if (activeChip === 'possession') list = list.filter(p => p.status !== 'ready');
@@ -815,7 +864,7 @@ const Listings = ({ projectOnly = false }) => {
               {selectedCategory === 'project' || projectOnly ? 'New Builder Projects & Developments' : 'Properties and Projects in nearby area'}
             </h1>
             <p className="lp-list-meta">
-              <strong>{filtered.length}</strong> {selectedCategory === 'project' || projectOnly ? 'Projects' : 'Properties'} · Verified Residential & Commercial
+              <strong>{filtered.length}</strong> matches across {properties.length} loaded listings · {pagination.total} total listings
             </p>
           </div>
           <button className="lp-mobile-filter-btn" onClick={() => setFiltersOpen(true)}>
@@ -883,9 +932,9 @@ const Listings = ({ projectOnly = false }) => {
             <input
               type="text"
               placeholder="Search by title, locality, city, state, builder, or property type (e.g. Villa, Mumbai, Luxury, Penthouse)..."
-              value={locationSearch}
+              value={searchInput}
               onChange={(e) => {
-                setLocationSearch(e.target.value);
+                setSearchInput(e.target.value);
                 setVisibleCount(6);
               }}
               style={{
@@ -898,10 +947,10 @@ const Listings = ({ projectOnly = false }) => {
                 color: 'var(--text)',
               }}
             />
-            {locationSearch && (
+            {searchInput && (
               <button
                 type="button"
-                onClick={() => setLocationSearch('')}
+                onClick={() => { setSearchInput(''); setLocationSearch(''); }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -1086,8 +1135,8 @@ const Listings = ({ projectOnly = false }) => {
                   type="text"
                   className="lp-loc-search"
                   placeholder="Search area, locality..."
-                  value={locationSearch}
-                  onChange={e => setLocationSearch(e.target.value)}
+                  value={searchInput}
+                  onChange={e => { setSearchInput(e.target.value); setVisibleCount(6); }}
                   style={{
                     width: '100%',
                     padding: '8px 32px 8px 10px',
@@ -1100,9 +1149,9 @@ const Listings = ({ projectOnly = false }) => {
                     boxSizing: 'border-box',
                   }}
                 />
-                {locationSearch && (
+                {searchInput && (
                   <button
-                    onClick={() => setLocationSearch('')}
+                    onClick={() => { setSearchInput(''); setLocationSearch(''); }}
                     style={{
                       position: 'absolute', right: '8px', top: '50%',
                       transform: 'translateY(-50%)', background: 'none',
@@ -1403,7 +1452,7 @@ const Listings = ({ projectOnly = false }) => {
 
             <div className="lp-results-bar">
               <span>
-                Showing <strong>{filtered.length > 0 ? Math.min(visibleCount, filtered.length) : 0}</strong> of <strong>{filtered.length}</strong> {selectedCategory === 'project' || projectOnly ? 'projects' : 'properties'}
+                Showing <strong>{filtered.length > 0 ? Math.min(visibleCount, filtered.length) : 0}</strong> loaded matches across <strong>{properties.length}</strong> listings
               </span>
               <span style={{ fontSize: '.8rem', color: 'var(--text-light)' }}>Updated just now</span>
             </div>
@@ -1598,11 +1647,11 @@ const Listings = ({ projectOnly = false }) => {
             </div>
 
             <div className="lp-load-more" style={{ marginTop: '32px', textAlign: 'center' }}>
-              {visibleCount < filtered.length ? (
+              {visibleCount < filtered.length || pagination.page < pagination.totalPages ? (
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                   <button
                     className="lp-load-more-btn"
-                    onClick={() => setVisibleCount(prev => prev + 6)}
+                    onClick={handleLoadMore}
                     style={{
                       background: 'var(--navy)',
                       color: '#fff',
@@ -1616,7 +1665,7 @@ const Listings = ({ projectOnly = false }) => {
                       transition: 'all 0.2s ease',
                     }}
                   >
-                    See More Properties
+                    {loadingMore ? 'Loading listings…' : visibleCount < filtered.length ? 'See More Properties' : 'Load more listings'}
                   </button>
                 </div>
               ) : filtered.length > 0 ? (
@@ -1651,20 +1700,22 @@ const Listings = ({ projectOnly = false }) => {
       {/* Global Standard Footer */}
       <Footer />
 
-      {/* Auth Modals */}
+      {/* Auth Modals — forms are lazy-loaded; Suspense shows fallback while chunk downloads */}
       <Modal
         isOpen={authModalState === 'login'}
         onClose={() => setAuthModalState(null)}
         title="Sign In to EstateXplorer"
       >
-        <LoginForm
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToRegister={(email) => {
-            if (email) setAuthModalEmail(email);
-            setAuthModalState('register');
-          }}
-          onSwitchToForgot={() => setAuthModalState('forgot')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <LoginForm
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToRegister={(email) => {
+              if (email) setAuthModalEmail(email);
+              setAuthModalState('register');
+            }}
+            onSwitchToForgot={() => setAuthModalState('forgot')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -1672,11 +1723,13 @@ const Listings = ({ projectOnly = false }) => {
         onClose={() => setAuthModalState(null)}
         title="Create your EstateXplorer Account"
       >
-        <RegisterForm
-          initialEmail={authModalEmail}
-          onSuccess={() => setAuthModalState(null)}
-          onSwitchToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <RegisterForm
+            initialEmail={authModalEmail}
+            onSuccess={() => setAuthModalState(null)}
+            onSwitchToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       <Modal
@@ -1684,13 +1737,15 @@ const Listings = ({ projectOnly = false }) => {
         onClose={() => setAuthModalState(null)}
         title="Reset Your Password"
       >
-        <ForgotForm
-          onOtpSent={(email) => {
-            setAuthModalState(null);
-            navigate('/reset-password', { state: { email } });
-          }}
-          onBackToLogin={() => setAuthModalState('login')}
-        />
+        <Suspense fallback={AUTH_MODAL_FALLBACK}>
+          <ForgotForm
+            onOtpSent={(email) => {
+              setAuthModalState(null);
+              navigate('/reset-password', { state: { email } });
+            }}
+            onBackToLogin={() => setAuthModalState('login')}
+          />
+        </Suspense>
       </Modal>
 
       {/* Professional Property Share Modal */}

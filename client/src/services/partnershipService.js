@@ -28,8 +28,8 @@ export const getBuilderPartnerships = async (projectId = null) => {
   return response.data;
 };
 
-export const updatePartnershipStatus = async (id, status, commissionRate = null) => {
-  const response = await api.patch(`/partnerships/${id}/status`, { status, commissionRate });
+export const updatePartnershipStatus = async (id, status, commissionRate = null, rejectionReason = '') => {
+  const response = await api.patch(`/partnerships/${id}/status`, { status, commissionRate, rejectionReason });
   return response.data;
 };
 

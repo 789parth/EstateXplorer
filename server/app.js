@@ -4,7 +4,6 @@ const cookieParser = require('cookie-parser');
 const compression = require('compression');
 const dotenv = require('dotenv');
 const path = require('path');
-const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const propertyRoutes = require('./routes/propertyRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
@@ -15,6 +14,10 @@ const errorMiddleware = require('./middleware/errorMiddleware');
 dotenv.config();
 
 const app = express();
+const configuredProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '0', 10);
+if (Number.isInteger(configuredProxyHops) && configuredProxyHops >= 0 && configuredProxyHops <= 10) {
+  app.set('trust proxy', configuredProxyHops);
+}
 
 // High-speed response compression (Gzip / Deflate)
 app.use(compression({
@@ -40,28 +43,19 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Ensure DB connection for request handlers
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error('Database connection error in request middleware:', err.message);
-    res.status(500).json({
-      success: false,
-      message: 'Database connection failed',
-      error: err.message,
-    });
-  }
-});
+// DB connection is established at server startup in server.js.
+// No per-request connection overhead needed.
 
 // Middleware
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps, curl, or same-origin serverless)
       if (!origin) return callback(null, true);
-      return callback(null, true);
+      const allowedOrigins = [process.env.CLIENT_URL, ...(process.env.CORS_ALLOWED_ORIGINS || '').split(',')]
+        .map((value) => value?.trim())
+        .filter(Boolean);
+      if (process.env.NODE_ENV !== 'production') allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
+      return callback(null, allowedOrigins.includes(origin));
     },
     credentials: true,
   })
@@ -92,8 +86,12 @@ const Attribution = require('./models/Attribution');
 const Booking = require('./models/Booking');
 const LeadAuditLog = require('./models/LeadAuditLog');
 
-// Background tasks on start: sync indexes and migrate uploads
-connectDB().then(() => {
+// Sync indexes and migrate uploads once after the DB connection is established.
+// Using the mongoose 'connected' event avoids a second connectDB() call from app.js
+// (server.js already calls connectDB() during startup).
+const mongoose = require('mongoose');
+const OTP = require('./models/OTP');
+const runStartupTasks = () => {
   Property.syncIndexes().catch(() => {});
   Inquiry.syncIndexes().catch(() => {});
   User.syncIndexes().catch(() => {});
@@ -108,8 +106,15 @@ connectDB().then(() => {
   Attribution.syncIndexes().catch(() => {});
   Booking.syncIndexes().catch(() => {});
   LeadAuditLog.syncIndexes().catch(() => {});
+  OTP.syncIndexes().catch(() => {}); // Ensure expiresAt TTL index and email+purpose index are active
   migrateLocalUploadsToAtlas().catch((e) => console.warn('Atlas migration note:', e.message));
-}).catch(() => {});
+};
+if (mongoose.connection.readyState === 1) {
+  // Already connected (e.g. test environments or hot reload)
+  runStartupTasks();
+} else {
+  mongoose.connection.once('connected', runStartupTasks);
+}
 
 // Serve uploaded media directly from MongoDB Atlas GridFS (Worldwide persistent streaming)
 app.get(['/uploads/:filename', '/uploads/*', '/api/uploads/:filename', '/api/uploads/*'], async (req, res) => {

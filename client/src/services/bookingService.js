@@ -22,7 +22,7 @@ export const getMyBookings = async () => {
   return response.data;
 };
 
-export const markCommissionPaid = async (bookingId) => {
-  const response = await api.patch(`/bookings/${bookingId}/commission-paid`);
+export const markCommissionPaid = async (bookingId, transactionRef) => {
+  const response = await api.patch(`/bookings/${bookingId}/commission-paid`, { transactionRef });
   return response.data;
 };

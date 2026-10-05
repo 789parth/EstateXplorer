@@ -39,4 +39,5 @@ const TrustBar = () => {
   );
 };
 
-export default TrustBar;
+export default React.memo(TrustBar);
+

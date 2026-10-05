@@ -6,6 +6,7 @@ import RoleManagementSection from '../../components/dashboard/RoleManagementSect
 import SecuritySettingsSection from '../../components/dashboard/SecuritySettingsSection';
 import { formatPhoneNumber, formatTitleCase, formatCode, sanitizeInput, isValidIndianMobile } from '../../utils/formatters';
 import { uploadImage, getMyProperties, getMyInquiries } from '../../services/propertyService';
+import { getBuilderPartnerships } from '../../services/partnershipService';
 import {
   Upload,
   FileText,
@@ -22,6 +23,7 @@ import {
   MessageSquare,
   Calendar,
   ShieldCheck,
+  Users,
 } from 'lucide-react';
 import './BuilderDashboard.css';
 import './BuilderProfile.css';
@@ -46,14 +48,16 @@ const BuilderProfile = () => {
   const [projectCount, setProjectCount] = useState(0);
   const [newCount, setNewCount] = useState(0);
   const [visitCount, setVisitCount] = useState(0);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
     const fetchCounts = async () => {
       try {
-        const [propsRes, inqsRes] = await Promise.allSettled([
+        const [propsRes, inqsRes, partRes] = await Promise.allSettled([
           getMyProperties(),
           getMyInquiries(),
+          getBuilderPartnerships(),
         ]);
 
         if (isMounted) {
@@ -64,6 +68,10 @@ const BuilderProfile = () => {
             const inqs = inqsRes.value.data;
             setNewCount(inqs.filter((e) => e.status === 'new').length);
             setVisitCount(inqs.filter((e) => e.status === 'visit').length);
+          }
+          if (partRes.status === 'fulfilled' && partRes.value?.success && Array.isArray(partRes.value.data)) {
+            const pending = partRes.value.data.filter(p => p.status === 'pending');
+            setPendingRequestsCount(pending.length > 0 ? pending.length : partRes.value.data.length);
           }
         }
       } catch (err) {
@@ -285,8 +293,8 @@ const BuilderProfile = () => {
         <div className="sidebar-brand">
           <div className="logo-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-              <polyline points="9 22 9 12 15 12 15 22"/>
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </div>
           <div>
@@ -342,6 +350,19 @@ const BuilderProfile = () => {
                 <span className="nav-badge nav-badge-amber">{visitCount}</span>
               )}
             </Link>
+
+            <Link
+              to="/dashboard?tab=requests"
+              className="nav-item w-full text-left flex items-center justify-between"
+            >
+              <span className="flex items-center gap-2">
+                <Users size={18} />
+                <span>Agent Requests</span>
+              </span>
+              {pendingRequestsCount > 0 && (
+                <span className="nav-badge nav-badge-amber">{pendingRequestsCount}</span>
+              )}
+            </Link>
           </div>
 
           <div className="nav-section">
@@ -350,11 +371,19 @@ const BuilderProfile = () => {
               <ShieldCheck size={18} />
               <span>Profile</span>
             </Link>
+            <Link className="nav-item" to="/">
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" /></svg>
+              Homepage
+            </Link>
+            <Link className="nav-item" to="/listings">
+              <Eye size={18} />
+              Browse Market
+            </Link>
             <button
               className="nav-item w-full text-left bg-transparent border-0 cursor-pointer flex items-center gap-2"
               onClick={logout}
             >
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
               <span>Sign Out</span>
             </button>
           </div>
@@ -379,8 +408,8 @@ const BuilderProfile = () => {
           </div>
           <div className="topbar-actions" style={{ display: 'flex', gap: '10px' }}>
             {/* <button className="btn btn-outline" style={{ padding: '9px 18px', borderRadius: '8px', border: '1.5px solid var(--border-strong)', background: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>View Public Profile</button> */}
-            <button 
-              className="btn btn-primary" 
+            <button
+              className="btn btn-primary"
               onClick={handleSave}
               style={{ padding: '9px 18px', borderRadius: '8px', border: 'none', background: saving ? '#1a7a4c' : 'var(--navy)', color: '#fff', fontSize: '0.85rem', fontWeight: 600, transition: 'background 0.2s' }}
             >
@@ -395,7 +424,7 @@ const BuilderProfile = () => {
             <div className="logo-wrap">
               <div className="company-logo">{initials}</div>
               <button className="logo-edit" title="Change logo">
-                <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" /><circle cx="12" cy="13" r="4" /></svg>
               </button>
             </div>
             <div className="hero-info">
@@ -572,7 +601,7 @@ const BuilderProfile = () => {
               <div className="form-card">
                 <div className="form-card-title">Verification Documents</div>
                 <div className="form-card-desc">Upload documents for account verification. Verified builders get a trust badge on listings.</div>
-                
+
                 {/* Hidden file input for uploading or replacing */}
                 <input
                   type="file"
@@ -587,7 +616,7 @@ const BuilderProfile = () => {
                     {documents.map((doc, idx) => (
                       <div className="doc-item" key={idx}>
                         <div className="doc-icon">
-                          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
                         </div>
                         <div className="doc-info">
                           <div className="doc-name">{doc.name}</div>

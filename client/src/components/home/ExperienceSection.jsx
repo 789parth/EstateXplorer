@@ -92,6 +92,8 @@ const ExperienceSection = () => {
           <img
             src={previewImages[activeControl] || previewImages.Rotate}
             alt="3D Building Preview"
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
 
@@ -139,4 +141,4 @@ const ExperienceSection = () => {
   );
 };
 
-export default ExperienceSection;
+export default React.memo(ExperienceSection);

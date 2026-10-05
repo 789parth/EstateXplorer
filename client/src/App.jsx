@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './hooks/useAuth';
 import Toast from './components/common/Toast';
@@ -24,6 +24,7 @@ const AboutUs = lazy(aboutUsImport);
 const ContactUs = lazy(contactUsImport);
 const Login = lazy(loginImport);
 const Register = lazy(registerImport);
+const AdminLogin = lazy(() => import('./pages/auth/AdminLogin'));
 const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/auth/ResetPassword'));
 
@@ -60,8 +61,10 @@ const PageLoader = () => (
 );
 
 // Role-based dashboard router
-const DashboardRouter = () => {
+const DashboardRouter = ({ requireAdmin = false }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -69,11 +72,37 @@ const DashboardRouter = () => {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'admin') return <AdminDashboard />;
-  if (user.role === 'builder') return <BuilderDashboard />;
-  if (user.role === 'agent') return <AgentDashboard />;
-  if (user.role === 'owner') return <OwnerDashboard />;
+  if (!user) {
+    if (requireAdmin) {
+      return <Navigate to="/admin-portal/login" replace />;
+    }
+    return <Navigate to="/login" replace />;
+  }
+  const activeRole = user.role || 'buyer';
+
+  if (requireAdmin && activeRole !== 'admin' && !user.roles?.includes('admin')) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  // If requireAdmin or active role is admin, render AdminDashboard
+  if (requireAdmin || activeRole === 'admin') return <AdminDashboard />;
+
+  // If URL contains a specific role segment, validate it matches the user's active role
+  const pathLower = location.pathname.toLowerCase();
+  const pathRole = pathLower.includes('/builder') ? 'builder'
+    : pathLower.includes('/agent') ? 'agent'
+    : pathLower.includes('/owner') ? 'owner'
+    : pathLower.includes('/buyer') ? 'buyer'
+    : null;
+
+  if (pathRole && pathRole !== activeRole) {
+    // User is at the wrong role URL — redirect to their canonical dashboard
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  if (activeRole === 'builder') return <BuilderDashboard />;
+  if (activeRole === 'agent') return <AgentDashboard />;
+  if (activeRole === 'owner') return <OwnerDashboard />;
   // Default: buyer dashboard
   return <BuyerDashboard />;
 };
@@ -89,9 +118,13 @@ const ProfileRouter = () => {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'builder') return <BuilderProfile />;
-  if (user.role === 'agent') return <AgentProfile />;
-  if (user.role === 'owner') return <OwnerProfile />;
+
+  const activeRole = user.role || 'buyer';
+
+  if (activeRole === 'admin') return <BuyerProfile />;
+  if (activeRole === 'builder') return <BuilderProfile />;
+  if (activeRole === 'agent') return <AgentProfile />;
+  if (activeRole === 'owner') return <OwnerProfile />;
   // Default: buyer profile
   return <BuyerProfile />;
 };
@@ -112,12 +145,13 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/admin-portal/login" element={<AdminLogin />} />
               <Route path="/dashboard" element={<DashboardRouter />} />
               <Route path="/dashboard/builder" element={<DashboardRouter />} />
               <Route path="/dashboard/buyer" element={<DashboardRouter />} />
               <Route path="/dashboard/agent" element={<DashboardRouter />} />
               <Route path="/dashboard/owner" element={<DashboardRouter />} />
-              <Route path="/admin" element={<DashboardRouter />} />
+              <Route path="/admin" element={<DashboardRouter requireAdmin={true} />} />
               <Route path="/dashboard/profile" element={<ProfileRouter />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/projects" element={<Listings projectOnly={true} />} />

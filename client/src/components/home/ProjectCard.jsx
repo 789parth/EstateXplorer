@@ -72,4 +72,4 @@ const ProjectCard = ({ project, onExplore }) => {
   );
 };
 
-export default ProjectCard;
+export default React.memo(ProjectCard);

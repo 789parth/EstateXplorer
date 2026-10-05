@@ -18,7 +18,7 @@ const bookingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ProjectUnit',
       required: true,
-      index: true,
+      // index defined at schema level below (partial unique index for confirmed bookings)
     },
     builder: {
       type: mongoose.Schema.Types.ObjectId,
@@ -87,16 +87,28 @@ const bookingSchema = new mongoose.Schema(
     commission: {
       rate: { type: Number, default: 0 },
       amount: { type: Number, default: 0 },
-      status: { type: String, enum: ['due', 'partial', 'paid'], default: 'due' },
+      status: { type: String, enum: ['due', 'partial', 'paid', 'not_applicable'], default: 'not_applicable' },
       paidAt: { type: Date, default: null },
       transactionRef: { type: String, default: '' },
     },
+    paymentDetails: {
+      method: { type: String, default: '' },
+      transactionRef: { type: String, default: '' },
+      paidAt: { type: Date, default: null },
+    },
+    notes: { type: String, trim: true, maxlength: 2000, default: '' },
   },
   { timestamps: true }
 );
 
 bookingSchema.index({ builder: 1, createdAt: -1 });
 bookingSchema.index({ agent: 1, createdAt: -1 });
+bookingSchema.index({ buyer: 1, createdAt: -1 });
 bookingSchema.index({ unit: 1, status: 1 });
+// Database-level double-booking prevention: only 1 confirmed booking per unit
+bookingSchema.index(
+  { unit: 1 },
+  { unique: true, partialFilterExpression: { status: 'confirmed' } }
+);
 
 module.exports = mongoose.model('Booking', bookingSchema);

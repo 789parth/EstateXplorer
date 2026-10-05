@@ -10,6 +10,9 @@ const {
   getUsers,
   deleteUser,
   toggleBlockUser,
+  getKycRequests,
+  approveKycRequest,
+  rejectKycRequest,
 } = require('../controllers/adminController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 const validate = require('../middleware/validateMiddleware');
@@ -19,6 +22,11 @@ const router = express.Router();
 // Enforce authentication AND admin role for all /api/admin routes
 router.use(protect);
 router.use(authorize('admin'));
+
+// KYC Document Verification Management for Builder, Agent, Owner
+router.get('/kyc-requests', getKycRequests);
+router.patch('/kyc-requests/:userId/approve', approveKycRequest);
+router.patch('/kyc-requests/:userId/reject', rejectKycRequest);
 
 // Role request management
 router.get('/role-requests', getRoleRequests);

@@ -13,11 +13,23 @@ const {
   normalizePhoneNumber,
   normalizeCode,
 } = require('../utils/formatters');
+const { cascadeDeleteAllUserData } = require('../services/cascadeDeleteService');
+const { sendTwilioPhoneOtp, verifyTwilioPhoneOtp } = require('../services/smsNotificationService');
 
 const EFFECTIVE_GOOGLE_CLIENT_ID =
   process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_ID.includes('your_google_')
     ? process.env.GOOGLE_CLIENT_ID
     : '187470311176-40peqhlrvqs7e6dqckgfc9o62ub0vqom.apps.googleusercontent.com';
+
+function hashOtp(email, purpose, code) {
+  const secret = process.env.OTP_HASH_SECRET || process.env.JWT_ACCESS_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new AppError('OTP security configuration is missing. Configure a strong OTP_HASH_SECRET.', 500);
+  }
+  return crypto.createHmac('sha256', secret)
+    .update(`${String(email).toLowerCase()}|${purpose}|${String(code).trim()}`)
+    .digest('hex');
+}
 
 const googleClient = new OAuth2Client(EFFECTIVE_GOOGLE_CLIENT_ID);
 
@@ -69,31 +81,37 @@ exports.register = async (req, res, next) => {
       });
     }
 
-    // Check if email already exists
-    const userExists = await User.findOne({ email: normalizedEmail });
+    // Public registration assigns standard portal roles ['buyer', 'builder', 'agent', 'owner']
+    // User can login through any of these 4 roles without role request or role verification.
+    const activeRole = req.body.role && ['buyer', 'owner', 'builder', 'agent'].includes(req.body.role)
+      ? req.body.role
+      : 'buyer';
+
+    // Administrator cannot be registered via public registration
+    if (req.body.role === 'admin') {
+      return next(
+        new AppError('Direct registration as administrator is not permitted.', 403)
+      );
+    }
+
+    // Check if email already exists — fetch only _id (minimal projection)
+    const userExists = await User.findOne({ email: normalizedEmail }).select('_id').lean();
     if (userExists) {
       return next(new AppError('Email is already registered. Please log in.', 400));
     }
 
-    // Requested role from registration form
-    const requestedRole = req.body.role && ['buyer', 'owner', 'builder', 'agent', 'admin'].includes(req.body.role)
-      ? req.body.role
-      : 'buyer';
-
-    // STRICT ROLE SECURITY: Users CANNOT sign up directly with privileged roles (builder, agent, owner, admin)
-    // If a non-buyer role is requested during sign-up, reject immediately with 403 Forbidden
-    if (requestedRole !== 'buyer') {
-      return next(
-        new AppError(
-          `Sign-up with the '${requestedRole}' role is not permitted without prior administrator approval. Please sign up as Buyer and submit a role request from your dashboard.`,
-          403
-        )
-      );
+    // Check if mobile number already exists (strictly 1 account per mobile number)
+    const normalizedPhone = normalizePhoneNumber(phone);
+    if (!normalizedPhone) {
+      return next(new AppError('Mobile number is required for registration.', 400));
+    }
+    const cleanPhoneDigits = String(normalizedPhone).replace(/\D/g, '').slice(-10);
+    const phoneExists = await User.findOne({ phone: new RegExp(`${cleanPhoneDigits}$`) }).select('_id').lean();
+    if (phoneExists) {
+      return next(new AppError('Mobile number is already registered. Please log in or use a different mobile number.', 400));
     }
 
-    // All new sign-ups are strictly registered with role: 'buyer' and roles: ['buyer']
-    const activeRole = 'buyer';
-    const userRoles = ['buyer'];
+    const userRoles = ['buyer', 'builder', 'agent', 'owner'];
 
     const user = await User.create({
       name: normalizeTitleCase(name),
@@ -107,11 +125,13 @@ exports.register = async (req, res, next) => {
       ownerProfile: ownerProfile || undefined,
     });
 
+    const roleNameCapitalized = activeRole.charAt(0).toUpperCase() + activeRole.slice(1);
+
     // Send welcome greeting email asynchronously
     sendEmail({
       email: user.email,
       subject: 'Welcome to EstateXplorer!',
-      message: `Welcome, ${user.name}! Thank you for registering on EstateXplorer as a Buyer.`,
+      message: `Welcome, ${user.name}! Thank you for registering on EstateXplorer as a ${roleNameCapitalized}.`,
       html: `
         <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 600px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
           <div style="text-align: center; margin-bottom: 20px;">
@@ -185,40 +205,49 @@ exports.sendRegistrationOTP = async (req, res, next) => {
       });
     }
 
-    // Check if email already registered
-    const userExists = await User.findOne({ email: normalizedEmail });
+    // Check if email already registered — fetch only _id (minimal projection)
+    const userExists = await User.findOne({ email: normalizedEmail }).select('_id').lean();
     if (userExists) {
       return next(new AppError('Email is already registered. Please sign in.', 400));
     }
 
-    // Strictly enforce buyer-only registration
-    const requestedRole = role && ['buyer', 'owner', 'builder', 'agent', 'admin'].includes(role)
+    // Check if mobile number already exists (strictly 1 account per mobile number)
+    if (!phone) {
+      return next(new AppError('Mobile number is required for registration.', 400));
+    }
+    const cleanPhoneDigits = String(phone).replace(/\D/g, '').slice(-10);
+    if (cleanPhoneDigits.length < 10) {
+      return next(new AppError('Please provide a valid 10-digit mobile number.', 400));
+    }
+    const phoneExists = await User.findOne({ phone: new RegExp(`${cleanPhoneDigits}$`) }).select('_id').lean();
+    if (phoneExists) {
+      return next(new AppError('Mobile number is already registered. Please sign in or use a different mobile number.', 400));
+    }
+
+    // Validate role (buyer, owner, builder, agent)
+    const requestedRole = role && ['buyer', 'owner', 'builder', 'agent'].includes(role)
       ? role
       : 'buyer';
 
-    if (requestedRole !== 'buyer') {
+    if (role === 'admin') {
       return next(
-        new AppError(
-          `Sign-up with the '${requestedRole}' role is not permitted without prior administrator approval. Please sign up as Buyer and submit a role request from your dashboard.`,
-          403
-        )
+        new AppError('Direct registration as administrator is not permitted.', 403)
       );
     }
 
     // Generate 6-digit OTP code
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = String(crypto.randomInt(100000, 1000000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     // Clear previous pending OTPs for this email with email_verify purpose
     await OTP.deleteMany({ email: normalizedEmail, purpose: 'email_verify' });
     await OTP.create({
       email: normalizedEmail,
-      code: otpCode,
+      code: hashOtp(normalizedEmail, 'email_verify', otpCode),
       purpose: 'email_verify',
       expiresAt,
     });
 
-    console.log('📧 Registration Email Verification OTP generated for %s: %s', normalizedEmail, otpCode);
 
     // Send verification email
     const recipientName = name ? normalizeTitleCase(name) : 'Valued User';
@@ -276,16 +305,27 @@ exports.verifyRegistrationOTP = async (req, res, next) => {
       return next(new AppError('Please provide a valid email address', 400));
     }
 
-    // Double-check existing user
-    const existingUser = await User.findOne({ email: normalizedEmail });
+    // Double-check existing user by email — fetch only _id
+    const existingUser = await User.findOne({ email: normalizedEmail }).select('_id').lean();
     if (existingUser) {
       return next(new AppError('An account with this email already exists. Please log in.', 400));
+    }
+
+    // Double-check existing user by mobile number — fetch only _id
+    const normalizedPhone = normalizePhoneNumber(phone);
+    if (!normalizedPhone) {
+      return next(new AppError('Mobile number is required for registration.', 400));
+    }
+    const cleanPhoneDigits = String(normalizedPhone).replace(/\D/g, '').slice(-10);
+    const phoneExists = await User.findOne({ phone: new RegExp(`${cleanPhoneDigits}$`) }).select('_id').lean();
+    if (phoneExists) {
+      return next(new AppError('An account with this mobile number already exists. Please log in.', 400));
     }
 
     // Verify OTP record
     const otpRecord = await OTP.findOne({
       email: normalizedEmail,
-      code: otpInput,
+      code: hashOtp(normalizedEmail, 'email_verify', otpInput),
       purpose: 'email_verify',
       expiresAt: { $gt: new Date() },
     });
@@ -294,28 +334,27 @@ exports.verifyRegistrationOTP = async (req, res, next) => {
       return next(new AppError('Invalid or expired verification code. Please request a new one.', 400));
     }
 
-    // Strict role validation
-    const requestedRole = role && ['buyer', 'owner', 'builder', 'agent', 'admin'].includes(role)
+    // Role validation (buyer, owner, builder, agent)
+    const activeRole = role && ['buyer', 'owner', 'builder', 'agent'].includes(role)
       ? role
       : 'buyer';
 
-    if (requestedRole !== 'buyer') {
+    if (role === 'admin') {
       return next(
-        new AppError(
-          `Sign-up with the '${requestedRole}' role is not permitted without prior administrator approval.`,
-          403
-        )
+        new AppError('Direct registration as administrator is not permitted.', 403)
       );
     }
 
-    // Create user with isVerified: true
+    const userRoles = ['buyer', 'builder', 'agent', 'owner'];
+
+    // Create user with isVerified: true and standard portal roles
     const user = await User.create({
       name: normalizeTitleCase(name),
       email: normalizedEmail,
       phone: normalizePhoneNumber(phone),
       password,
-      role: 'buyer',
-      roles: ['buyer'],
+      role: activeRole,
+      roles: userRoles,
       isVerified: true,
       builderProfile: builderProfile || undefined,
       agentProfile: agentProfile || undefined,
@@ -383,17 +422,6 @@ exports.login = async (req, res, next) => {
       return next(new AppError('Invalid credentials', 401));
     }
 
-    // Check if account uses a disposable domain
-    const disposableCheck = await isDisposableEmail(user.email);
-    if (disposableCheck.isDisposable) {
-      return next(
-        new AppError(
-          'Access Blocked: Accounts registered with temporary or disposable email addresses are prohibited.',
-          403
-        )
-      );
-    }
-
     // Check if user is blocked by administrator
     if (user.isBlocked) {
       return next(
@@ -410,72 +438,50 @@ exports.login = async (req, res, next) => {
       user.roles = [user.role || 'buyer'];
     }
 
-    // STRICT ROLE SECURITY CHECK:
-    // If the user selected a role during login other than 'buyer' (e.g. 'agent', 'builder', 'owner', 'admin')
-    if (role && role !== 'buyer') {
-      const isApproved = user.roles.includes(role);
-      if (!isApproved) {
-        // Check if there is a pending request
-        const pendingReq = await RoleRequest.findOne({
-          userId: user._id,
-          requestedRole: role,
-          status: 'PENDING',
-        });
+    // STRICT ADMIN SEGREGATION:
+    // Administrator accounts are strictly forbidden from signing in through the public/standard login form.
+    const isAdminAccount = user.role === 'admin' || user.roles.includes('admin') || role === 'admin';
+    if (isAdminAccount) {
+      return next(
+        new AppError(
+          'Security Policy Violation: Administrator accounts cannot sign in through the public user login. Please access your dedicated Administrator Portal.',
+          403
+        )
+      );
+    }
 
-        if (pendingReq) {
-          return next(
-            new AppError(
-              `Your request for the '${role}' role is pending administrator review. You can only log in as Buyer until approved.`,
-              403
-            )
-          );
-        }
-
-        const rejectedReq = await RoleRequest.findOne({
-          userId: user._id,
-          requestedRole: role,
-          status: 'REJECTED',
-        });
-
-        if (rejectedReq) {
-          return next(
-            new AppError(
-              `Your request for the '${role}' role was declined. Please log in as Buyer or submit a new request from your profile.`,
-              403
-            )
-          );
-        }
-
-        return next(
-          new AppError(
-            `You do not have approved access for the '${role}' role. Please log in as Buyer or request access from your profile.`,
-            403
-          )
-        );
+    // Role selection during login (buyer, builder, agent, owner only)
+    if (role && ['buyer', 'builder', 'agent', 'owner'].includes(role)) {
+      // Ensure user.roles has the role
+      if (!user.roles || !Array.isArray(user.roles)) {
+        user.roles = ['buyer', 'builder', 'agent', 'owner'];
+      } else if (!user.roles.includes(role)) {
+        user.roles.push(role);
       }
-
-      // Approved! Set active role to chosen role
       user.role = role;
-      await user.save();
-    } else if (role === 'buyer') {
-      user.role = 'buyer';
-      await user.save();
+      user.save().catch(() => {});
+    } else if (role === 'admin') {
+      return next(
+        new AppError(
+          'Direct administrator login through public portal is not permitted. Please use Admin Login.',
+          403
+        )
+      );
     }
 
     // Two-Factor Authentication Check
     if (user.twoFactorEnabled) {
-      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpCode = String(crypto.randomInt(100000, 1000000));
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
       await OTP.deleteMany({ email: user.email, purpose: 'two_factor' });
       await OTP.create({
         email: user.email,
-        code: otpCode,
+        code: hashOtp(user.email, 'two_factor', otpCode),
         purpose: 'two_factor',
         expiresAt,
       });
 
-      console.log('🔐 Generated 2FA OTP for %s: %s', user.email, otpCode);
 
       sendEmail({
         email: user.email,
@@ -546,7 +552,7 @@ exports.refresh = async (req, res, next) => {
     try {
       decoded = jwt.verify(
         refreshToken,
-        process.env.JWT_REFRESH_SECRET || 'estatexplorer_refresh_secret'
+        process.env.JWT_REFRESH_SECRET
       );
     } catch (err) {
       return next(new AppError('Invalid or expired refresh token', 401));
@@ -606,7 +612,7 @@ exports.refresh = async (req, res, next) => {
 // @access  Private
 exports.getMe = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id).lean();
     if (!user) {
       return next(new AppError('User not found', 404));
     }
@@ -614,8 +620,7 @@ exports.getMe = async (req, res, next) => {
     const approvedRoles = user.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer'];
     const activeRole = approvedRoles.includes(user.role) ? user.role : 'buyer';
     if (user.role !== activeRole) {
-      user.role = activeRole;
-      await user.save();
+      User.updateOne({ _id: user._id }, { $set: { role: activeRole } }).catch(() => {});
     }
 
     res.status(200).json({
@@ -639,6 +644,7 @@ exports.getMe = async (req, res, next) => {
         builderProfile: user.builderProfile,
         agentProfile: user.agentProfile,
         ownerProfile: user.ownerProfile,
+        kycVerification: user.kycVerification || { status: 'unverified' },
         createdAt: user.createdAt,
       },
     });
@@ -679,7 +685,7 @@ exports.forgotPassword = async (req, res, next) => {
     }
 
     // Generate 6 digit OTP
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = String(crypto.randomInt(100000, 1000000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
     // Clear old OTPs for this email
@@ -688,12 +694,11 @@ exports.forgotPassword = async (req, res, next) => {
     // Save new OTP
     await OTP.create({
       email: normalizedEmail,
-      code: otpCode,
+      code: hashOtp(normalizedEmail, 'password_reset', otpCode),
       purpose: 'password_reset',
       expiresAt,
     });
 
-    console.log('🔑 Generated OTP for %s: %s', normalizedEmail, otpCode);
 
     const message = `Your EstateXplorer password reset OTP is ${otpCode}. It is valid for 10 minutes.`;
     const html = `
@@ -744,7 +749,7 @@ exports.verifyOTP = async (req, res, next) => {
 
     const otpRecord = await OTP.findOne({
       email: normalizedEmail,
-      code: otp,
+      code: hashOtp(normalizedEmail, 'password_reset', otp),
       purpose: 'password_reset',
       expiresAt: { $gt: new Date() },
     });
@@ -805,7 +810,7 @@ exports.resetPassword = async (req, res, next) => {
 
       const otpRecord = await OTP.findOne({
         email: normalizedEmail,
-        code,
+        code: hashOtp(normalizedEmail, 'password_reset', code),
         purpose: 'password_reset',
         expiresAt: { $gt: new Date() },
       });
@@ -879,7 +884,7 @@ exports.updateProfile = async (req, res, next) => {
         if (disposableCheck.isDisposable) {
           return next(new AppError(disposableCheck.publicMessage || 'Temporary or disposable email addresses are not allowed.', 400));
         }
-        const userExists = await User.findOne({ email: normalizedEmail, _id: { $ne: req.user._id } });
+        const userExists = await User.findOne({ email: normalizedEmail, _id: { $ne: req.user._id } }).select('_id').lean();
         if (userExists) {
           return next(new AppError('Email address is already registered to another account', 400));
         }
@@ -890,9 +895,19 @@ exports.updateProfile = async (req, res, next) => {
     if (name !== undefined) fieldsToUpdate.name = normalizeTitleCase(name);
     if (phone !== undefined) {
       const normalizedPhone = normalizePhoneNumber(phone);
+      if (normalizedPhone) {
+        const cleanNew = String(normalizedPhone).replace(/\D/g, '').slice(-10);
+        const existingPhoneUser = await User.findOne({
+          phone: new RegExp(`${cleanNew}$`),
+          _id: { $ne: req.user._id },
+        }).select('_id').lean();
+        if (existingPhoneUser) {
+          return next(new AppError('Mobile number is already registered to another account.', 400));
+        }
+      }
       fieldsToUpdate.phone = normalizedPhone;
       // If phone number has been genuinely changed to a different 10-digit number, reset phone verification status
-      const cleanNew = String(normalizedPhone).replace(/\D/g, '').slice(-10);
+      const cleanNew = String(normalizedPhone || '').replace(/\D/g, '').slice(-10);
       const cleanExisting = String(req.user?.phone || '').replace(/\D/g, '').slice(-10);
       if (cleanExisting && cleanNew && cleanNew !== cleanExisting) {
         fieldsToUpdate.isPhoneVerified = false;
@@ -1133,34 +1148,26 @@ exports.googleAuth = async (req, res, next) => {
         user.roles = ['buyer'];
       }
 
-      // STRICT ROLE SECURITY CHECK for Google Sign-in:
-      if (chosenRole && chosenRole !== 'buyer') {
-        const isApproved = user.roles.includes(chosenRole);
-        if (!isApproved) {
-          const pendingReq = await RoleRequest.findOne({
-            userId: user._id,
-            requestedRole: chosenRole,
-            status: 'PENDING',
-          });
+      // STRICT ADMIN SEGREGATION:
+      const isAdminAccount = user.role === 'admin' || user.roles.includes('admin') || chosenRole === 'admin';
+      if (isAdminAccount) {
+        return next(
+          new AppError(
+            'Security Policy Violation: Administrator accounts cannot sign in through public Google login. Please use the secure Administrator Portal.',
+            403
+          )
+        );
+      }
 
-          if (pendingReq) {
-            return next(
-              new AppError(
-                `Your request for the '${chosenRole}' role is pending administrator review. You cannot sign in with the '${chosenRole}' role until approved.`,
-                403
-              )
-            );
-          }
-
-          return next(
-            new AppError(
-              `You do not have approved access for the '${chosenRole}' role. You cannot sign in with the '${chosenRole}' role. Please sign in as Buyer or apply for role access from your profile.`,
-              403
-            )
-          );
+      // Standard role handling for Google Sign-in (buyer, builder, agent, owner only):
+      if (chosenRole && ['buyer', 'builder', 'agent', 'owner'].includes(chosenRole)) {
+        if (!user.roles || !Array.isArray(user.roles)) {
+          user.roles = ['buyer', 'builder', 'agent', 'owner'];
+        } else if (!user.roles.includes(chosenRole)) {
+          user.roles.push(chosenRole);
         }
         user.role = chosenRole;
-      } else if (chosenRole === 'buyer' || !chosenRole) {
+      } else {
         user.role = 'buyer';
       }
       await user.save();
@@ -1176,25 +1183,23 @@ exports.googleAuth = async (req, res, next) => {
       }
 
       // Brand new Google user trying to sign up:
-      // STRICT SECURITY: Cannot sign up directly into unapproved role
-      if (chosenRole && chosenRole !== 'buyer') {
+      if (chosenRole === 'admin') {
         return next(
-          new AppError(
-            `Sign-up with the '${chosenRole}' role is not permitted without prior administrator approval. Please sign up as Buyer and apply for '${chosenRole}' access from your dashboard.`,
-            403
-          )
+          new AppError('Direct registration as administrator is not permitted.', 403)
         );
       }
 
-      // Create brand new Google user - default is strictly 'buyer' with roles ['buyer']
-      const userRoles = ['buyer'];
+      const activeRole = chosenRole && ['buyer', 'owner', 'builder', 'agent'].includes(chosenRole)
+        ? chosenRole
+        : 'buyer';
+      const userRoles = ['buyer', 'builder', 'agent', 'owner'];
 
       user = await User.create({
         name,
         email: normalizedEmail,
         googleId,
         authProvider: 'google',
-        role: 'buyer',
+        role: activeRole,
         roles: userRoles,
         avatar: picture || '',
         isVerified: true, // Google accounts are pre-verified
@@ -1345,8 +1350,6 @@ exports.deleteAccount = async (req, res, next) => {
     const userId = req.user.id;
     const userEmail = req.user.email;
 
-    const { cascadeDeleteAllUserData } = require('../services/cascadeDeleteService');
-
     // Cascade delete user and all associated data by ID and email
     await cascadeDeleteAllUserData({ userId, email: userEmail });
 
@@ -1383,7 +1386,7 @@ exports.verify2FALogin = async (req, res, next) => {
 
     const otpRecord = await OTP.findOne({
       email: normalizedEmail,
-      code: code.toString().trim(),
+      code: hashOtp(normalizedEmail, 'two_factor', code),
       purpose: 'two_factor',
       expiresAt: { $gt: new Date() },
     });
@@ -1431,18 +1434,17 @@ exports.resend2FA = async (req, res, next) => {
       return next(new AppError('Two-factor authentication is not enabled for this account', 400));
     }
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = String(crypto.randomInt(100000, 1000000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     await OTP.deleteMany({ email: user.email, purpose: 'two_factor' });
     await OTP.create({
       email: user.email,
-      code: otpCode,
+      code: hashOtp(user.email, 'two_factor', otpCode),
       purpose: 'two_factor',
       expiresAt,
     });
 
-    console.log('🔁 Resent 2FA OTP for %s: %s', user.email, otpCode);
 
     sendEmail({
       email: user.email,
@@ -1516,18 +1518,17 @@ exports.sendVerifyEmailOTP = async (req, res, next) => {
       });
     }
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpCode = String(crypto.randomInt(100000, 1000000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
 
     await OTP.deleteMany({ email: user.email, purpose: 'email_verify' });
     await OTP.create({
       email: user.email,
-      code: otpCode,
+      code: hashOtp(user.email, 'email_verify', otpCode),
       purpose: 'email_verify',
       expiresAt,
     });
 
-    console.log('📧 Generated Email Verification OTP for %s: %s', user.email, otpCode);
 
     sendEmail({
       email: user.email,
@@ -1575,7 +1576,7 @@ exports.verifyEmail = async (req, res, next) => {
 
     const otpRecord = await OTP.findOne({
       email: user.email,
-      code: code.toString().trim(),
+      code: hashOtp(user.email, 'email_verify', code),
       purpose: 'email_verify',
       expiresAt: { $gt: new Date() },
     });
@@ -1621,7 +1622,6 @@ exports.sendPhoneVerificationOTP = async (req, res, next) => {
       return next(new AppError('Please enter a valid 10-digit mobile number starting with 6, 7, 8, or 9', 400));
     }
 
-    const { sendTwilioPhoneOtp } = require('../services/smsNotificationService');
     const result = await sendTwilioPhoneOtp({ phone: cleanDigits });
 
     if (!result.success) {
@@ -1659,7 +1659,6 @@ exports.verifyPhoneOTP = async (req, res, next) => {
     }
 
     const cleanDigits = String(rawPhone).replace(/\D/g, '').slice(-10);
-    const { verifyTwilioPhoneOtp } = require('../services/smsNotificationService');
     const verifyRes = await verifyTwilioPhoneOtp({ phone: cleanDigits, code: String(code).trim() });
 
     if (!verifyRes.success) {
@@ -1681,6 +1680,211 @@ exports.verifyPhoneOTP = async (req, res, next) => {
         phone: user.phone,
         isPhoneVerified: true,
         smsNotifications: true,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Dedicated secure login for platform administrators ONLY
+// @route   POST /api/auth/admin-secure-login
+// @access  Public (Rate-limited, strictly requires admin authorization)
+exports.adminLogin = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    const { normalizedEmail } = normalizeEmail(email);
+    if (!normalizedEmail || !password) {
+      return next(new AppError('Please provide administrative credentials', 400));
+    }
+
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
+    if (!user) {
+      return next(new AppError('Invalid administrative credentials', 401));
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return next(new AppError('Invalid administrative credentials', 401));
+    }
+
+    if (user.isBlocked) {
+      return next(
+        new AppError(
+          user.blockedReason || 'Administrative account is locked. Please contact infrastructure operations.',
+          403
+        )
+      );
+    }
+
+    // STRICT CHECK: Verify user is an authorized platform administrator
+    const hasAdminRole = user.role === 'admin' || (Array.isArray(user.roles) && user.roles.includes('admin'));
+    if (!hasAdminRole) {
+      return next(
+        new AppError(
+          'Access Denied: This portal is strictly restricted to verified platform administrators.',
+          403
+        )
+      );
+    }
+
+    // Set active role strictly to admin
+    user.role = 'admin';
+    if (!user.roles.includes('admin')) {
+      user.roles.push('admin');
+    }
+    await user.save();
+
+    // Two-Factor Authentication Check for Admin
+    if (user.twoFactorEnabled) {
+      const otpCode = String(crypto.randomInt(100000, 1000000));
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+
+      await OTP.deleteMany({ email: user.email, purpose: 'two_factor' });
+      await OTP.create({
+        email: user.email,
+        code: hashOtp(user.email, 'two_factor', otpCode),
+        purpose: 'two_factor',
+        expiresAt,
+      });
+
+
+      sendEmail({
+        email: user.email,
+        subject: 'SECURITY ALERT: Admin Portal Login 2FA Code',
+        message: `Your administrator verification code is ${otpCode}. It will expire in 10 minutes.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 24px; color: #0a1628; max-width: 520px; margin: 0 auto; border: 2px solid #0f172a; border-radius: 12px; background: #ffffff;">
+            <div style="background: #0f172a; color: #f8fafc; padding: 12px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
+              <span style="font-size: 13px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;">EstateXplorer Internal Security</span>
+            </div>
+            <h2 style="color: #0f172a; text-align: center; margin: 0 0 8px 0;">Administrator Authentication</h2>
+            <p style="color: #dc2626; font-size: 13px; font-weight: bold; text-align: center; margin-top: 0;">Elevated Privilege Access Attempt</p>
+            <p>Administrator <strong>${user.name}</strong>,</p>
+            <p>A sign-in request was detected at the secure administrative console. Enter the OTP code below to confirm your identity:</p>
+            <div style="text-align: center; margin: 28px 0;">
+              <span style="font-size: 36px; font-weight: 900; letter-spacing: 8px; color: #0f172a; background: #f1f5f9; padding: 14px 28px; border-radius: 8px; display: inline-block; font-family: monospace;">${otpCode}</span>
+            </div>
+            <p style="font-size: 12px; color: #64748b; text-align: center;">This code is valid for 10 minutes. If this was not authorized by you, trigger security escalation immediately.</p>
+          </div>
+        `,
+      }).catch((err) => console.error('Admin 2FA email send error:', err.message));
+
+      return res.status(200).json({
+        success: true,
+        require2FA: true,
+        email: user.email,
+        role: 'admin',
+        message: 'Administrator two-factor verification code dispatched to email',
+      });
+    }
+
+    sendTokenResponse(user, 200, res, 'Administrator authentication successful');
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Submit KYC documents for builder, agent, or owner before adding property
+// @route   POST /api/auth/kyc/submit
+// @access  Private (Builder, Agent, Owner)
+exports.submitKycDocuments = async (req, res, next) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return next(new AppError('User not found', 404));
+    }
+
+    const role = req.user.role;
+    if (!['builder', 'agent', 'owner'].includes(role)) {
+      return next(new AppError('Only Builders, Agents, and Owners are required to submit property documents', 400));
+    }
+
+    const { aadharCard, panCard, companyDoc, agencyDoc } = req.body;
+
+    // Aadhar Card and PAN Card are mandatory for all 3 roles
+    if (!aadharCard || !aadharCard.url) {
+      return next(new AppError('Aadhar Card document upload is mandatory.', 400));
+    }
+    if (!panCard || !panCard.url) {
+      return next(new AppError('PAN Card document upload is mandatory.', 400));
+    }
+
+    // Role-specific mandatory checks
+    if (role === 'builder' && companyDoc && companyDoc.url) {
+      // Company verification doc supplied or optional
+    }
+    if (role === 'agent' && agencyDoc && agencyDoc.url) {
+      // Agency verification doc supplied or optional
+    }
+
+    user.kycVerification = {
+      status: 'pending',
+      roleAtSubmission: role,
+      submittedAt: new Date(),
+      reviewedAt: null,
+      reviewedBy: null,
+      rejectionReason: '',
+      aadharCard: {
+        number: aadharCard.number ? aadharCard.number.trim() : '',
+        url: aadharCard.url.trim(),
+        name: aadharCard.name || 'Aadhar Card',
+        status: 'pending',
+      },
+      panCard: {
+        number: panCard.number ? panCard.number.trim().toUpperCase() : '',
+        url: panCard.url.trim(),
+        name: panCard.name || 'PAN Card',
+        status: 'pending',
+      },
+      companyDoc: {
+        number: companyDoc?.number ? companyDoc.number.trim() : '',
+        url: companyDoc?.url ? companyDoc.url.trim() : '',
+        name: companyDoc?.name || (role === 'builder' ? 'Company Verification' : ''),
+        status: companyDoc?.url ? 'pending' : 'unverified',
+      },
+      agencyDoc: {
+        number: agencyDoc?.number ? agencyDoc.number.trim() : '',
+        url: agencyDoc?.url ? agencyDoc.url.trim() : '',
+        name: agencyDoc?.name || (role === 'agent' ? 'Agency Verification' : ''),
+        status: agencyDoc?.url ? 'pending' : 'unverified',
+      },
+    };
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'KYC documents submitted successfully. Admin review is pending.',
+      data: {
+        kycVerification: user.kycVerification,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Get current user KYC status
+// @route   GET /api/auth/kyc/status
+// @access  Private
+exports.getKycStatus = async (req, res, next) => {
+  try {
+    const userId = req.user.id || req.user._id;
+    const user = await User.findById(userId).select('kycVerification role').lean();
+
+    if (!user) {
+      return next(new AppError('User not found', 404));
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        role: user.role,
+        kycVerification: user.kycVerification || { status: 'unverified' },
       },
     });
   } catch (error) {

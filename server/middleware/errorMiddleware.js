@@ -14,7 +14,8 @@ const errorMiddleware = (err, req, res, next) => {
   // Mongoose duplicate key
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue || {})[0] || 'field';
-    const message = `Duplicate value entered for ${field}. Please use another value.`;
+    const fieldName = field === 'phone' ? 'mobile number' : field === 'email' ? 'email address' : field;
+    const message = `An account with this ${fieldName} already exists. Please log in or use a different ${fieldName}.`;
     error = new AppError(message, 400);
   }
 

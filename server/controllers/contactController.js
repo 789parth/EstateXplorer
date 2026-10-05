@@ -1,5 +1,6 @@
 const Contact = require('../models/Contact');
 const AppError = require('../utils/AppError');
+const sendEmail = require('../utils/sendEmail');
 const { isDisposableEmail, normalizeEmail } = require('../services/disposableEmailService');
 
 // @desc    Submit a contact inquiry message
@@ -67,13 +68,13 @@ exports.submitContactMessage = async (req, res, next) => {
 // @access  Public / Private
 exports.getContactMessages = async (req, res, next) => {
   try {
-    // Automatically purge any inquiries from database that were already replied to
-    await Contact.deleteMany({
+    // Automatically purge any inquiries from database that were already replied to asynchronously
+    Contact.deleteMany({
       $or: [
         { replyMessage: { $exists: true, $ne: '' } },
         { repliedAt: { $exists: true, $ne: null } },
       ],
-    });
+    }).catch(() => {});
 
     const contacts = await Contact.find({
       $and: [
@@ -93,6 +94,7 @@ exports.getContactMessages = async (req, res, next) => {
       ],
     })
       .sort({ createdAt: -1 })
+      .limit(200)
       .lean();
 
     res.status(200).json({
@@ -174,7 +176,6 @@ exports.replyToContactMessage = async (req, res, next) => {
       return next(new AppError('Contact inquiry not found', 404));
     }
 
-    const sendEmail = require('../utils/sendEmail');
     const emailSubject = `Re: ${contact.subject || 'Your Inquiry on EstateXplorer'}`;
     const emailText = `Hello ${contact.name},\n\nThank you for reaching out to EstateXplorer.\n\nOur Response:\n${replyMessage.trim()}\n\n---\nYour Original Inquiry:\n"${contact.message}"\n\nBest regards,\nEstateXplorer Team\nsupport@estatexplorer.in`;
 

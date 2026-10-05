@@ -72,6 +72,8 @@ const supplementaryDisposableDomains = [
   'superrito.com',
   'teleworm.us',
   'einrot.com',
+  'olipii.com',
+  'findize.com',
 ];
 
 for (const domain of supplementaryDisposableDomains) {

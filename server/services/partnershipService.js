@@ -17,43 +17,54 @@ function generateAgentCode() {
  * Agent requests selling rights for a master project
  */
 async function requestPartnership(agentId, projectId, message = '') {
-  // Verify agent exists and has agent role
-  const agent = await User.findById(agentId);
-  if (!agent || agent.role !== 'agent') {
+  // Verify agent exists and has agent role — fetch only needed fields
+  const agent = await User.findById(agentId).select('name email role roles').lean();
+  if (!agent || (agent.role !== 'agent' && !agent.roles?.includes('agent'))) {
     throw new Error('Only registered Channel Partner Agents can request selling rights.');
   }
 
-  // Verify project exists and allows agent acquisition
-  const project = await Property.findById(projectId);
+  // Verify project or property exists and allows agent acquisition — fetch only needed fields
+  const project = await Property.findById(projectId)
+    .select('title builder allowAgentAcquisition networkEnabled category defaultCommissionRate')
+    .lean();
   if (!project) {
-    throw new Error('Project not found.');
+    throw new Error('Listing not found.');
+  }
+  if (!project.builder) {
+    throw new Error('Listing does not have an associated seller.');
   }
   if (!project.allowAgentAcquisition && !project.networkEnabled) {
-    throw new Error('This project is not currently accepting Agent acquisition requests.');
+    const itemType = project.category === 'project' ? 'project' : 'property';
+    throw new Error(`This ${itemType} is not currently accepting Agent acquisition requests.`);
   }
 
-  // Verify builder is different from agent
-  if (String(project.builder) === String(agentId)) {
-    throw new Error('Builders cannot be channel partners for their own projects.');
+  // Seller ID (builder or owner user)
+  const sellerId = project.builder;
+
+  // Verify seller is different from agent
+  if (String(sellerId) === String(agentId)) {
+    throw new Error('You cannot be an affiliate agent for your own listing.');
   }
 
   // Check if existing partnership exists
   let partnership = await Partnership.findOne({ agent: agentId, project: projectId });
   if (partnership) {
     if (partnership.status === 'approved') {
-      throw new Error('You are already an affiliated agent for this project.');
+      throw new Error(`You are already an affiliated agent for this ${project.category === 'project' ? 'project' : 'property'}.`);
     }
     if (partnership.status === 'pending') {
-      throw new Error('Your acquisition request is already pending review by the builder.');
+      throw new Error('Your acquisition request is already pending review by the seller.');
     }
     // If previously rejected or suspended, allow re-applying by updating to pending
     partnership.status = 'pending';
-    partnership.notes = message || partnership.notes;
+    partnership.proposalNotes = message || partnership.proposalNotes;
+    partnership.agentCode = undefined;
+    partnership.affiliateUrl = '';
     partnership.rejectedAt = null;
     await partnership.save();
 
-    // Re-notify builder
-    emitToUser(String(project.builder), SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED, {
+    // Re-notify seller
+    emitToUser(String(sellerId), SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED, {
       title: 'New Agent Request',
       message: `${agent.name} re-applied for affiliation on ${project.title}`,
       partnershipId: partnership._id,
@@ -62,7 +73,6 @@ async function requestPartnership(agentId, projectId, message = '') {
       agentEmail: agent.email,
       projectId,
       projectTitle: project.title,
-      agentCode: partnership.agentCode,
       status: 'pending',
       createdAt: new Date(),
     });
@@ -70,27 +80,17 @@ async function requestPartnership(agentId, projectId, message = '') {
     return partnership;
   }
 
-  // Generate unique agentCode
-  let agentCode;
-  let isUnique = false;
-  while (!isUnique) {
-    agentCode = generateAgentCode();
-    const existing = await Partnership.findOne({ agentCode });
-    if (!existing) isUnique = true;
-  }
-
   partnership = await Partnership.create({
-    builder: project.builder,
+    builder: sellerId,
     agent: agentId,
     project: projectId,
-    agentCode,
     commissionRate: project.defaultCommissionRate || 2.5,
     status: 'pending',
-    notes: message,
+    proposalNotes: message,
   });
 
-  // Real-time notification to Builder
-  emitToUser(String(project.builder), SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED, {
+  // Real-time notification to Seller
+  emitToUser(String(sellerId), SOCKET_EVENTS.PARTNERSHIP_REQUEST_CREATED, {
     title: 'New Agent Request',
     message: `${agent.name} requested affiliation for ${project.title}`,
     partnershipId: partnership._id,
@@ -99,7 +99,6 @@ async function requestPartnership(agentId, projectId, message = '') {
     agentEmail: agent.email,
     projectId,
     projectTitle: project.title,
-    agentCode,
     status: 'pending',
     createdAt: partnership.createdAt,
   });
@@ -108,9 +107,9 @@ async function requestPartnership(agentId, projectId, message = '') {
 }
 
 /**
- * Builder approves, rejects, or suspends a partnership request
+ * Seller approves, rejects, or suspends a partnership request
  */
-async function updatePartnershipStatus(builderId, partnershipId, status, commissionRate = null) {
+async function updatePartnershipStatus(builderId, partnershipId, status, commissionRate = null, rejectionReason = '') {
   // Normalize 'accepted' to 'approved'
   const normalizedStatus = status === 'accepted' ? 'approved' : status;
 
@@ -123,18 +122,25 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
     throw new Error('Partnership record not found.');
   }
 
-  // Enforce builder ownership
+  // Enforce seller ownership
   if (String(partnership.builder) !== String(builderId)) {
-    throw new Error('Unauthorized. You do not own the project associated with this partnership.');
+    throw new Error('Unauthorized. You do not own the project or property associated with this partnership.');
   }
 
-  // If approving, verify that project still allows agent acquisition
+  // If approving, verify that project or property still allows agent acquisition
   if (normalizedStatus === 'approved') {
     if (partnership.project && !partnership.project.allowAgentAcquisition && !partnership.project.networkEnabled) {
-      throw new Error('Cannot accept request: Project is no longer accepting agent acquisition.');
+      throw new Error('Cannot accept request: Listing is no longer accepting agent acquisition.');
     }
     partnership.approvedAt = new Date();
     partnership.rejectedAt = null;
+    if (!partnership.agentCode) {
+      let candidateCode;
+      do {
+        candidateCode = generateAgentCode();
+      } while (await Partnership.exists({ agentCode: candidateCode }));
+      partnership.agentCode = candidateCode;
+    }
     if (commissionRate !== null && commissionRate !== undefined) {
       partnership.commissionRate = Number(commissionRate);
     }
@@ -143,6 +149,11 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
   } else if (normalizedStatus === 'rejected') {
     partnership.rejectedAt = new Date();
     partnership.affiliateUrl = '';
+    partnership.agentCode = undefined;
+  } else if (normalizedStatus === 'suspended') {
+    partnership.affiliateUrl = '';
+    partnership.agentCode = undefined;
+    partnership.rejectionReason = String(rejectionReason || '').trim().slice(0, 1000);
   }
 
   partnership.status = normalizedStatus;
@@ -152,9 +163,10 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
   const notifTitle = normalizedStatus === 'approved' 
     ? 'Your Agent Request Has Been Accepted'
     : 'Your Agent Request Has Been Rejected';
+  const itemType = partnership.project?.category === 'project' ? 'project' : 'property';
   const notifMsg = normalizedStatus === 'approved'
-    ? `Congratulations! Your request to become an agent for "${partnership.project?.title || 'the project'}" was approved.`
-    : `Your request for "${partnership.project?.title || 'the project'}" was not accepted by the builder.`;
+    ? `Congratulations! Your request to become an agent for "${partnership.project?.title || itemType}" was approved.`
+    : `Your request for "${partnership.project?.title || itemType}" was not accepted by the seller.`;
 
   emitToUser(String(partnership.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
     title: notifTitle,
@@ -197,13 +209,15 @@ async function bulkApprovePartnerships(builderId, partnershipIds) {
  */
 async function getAgentPartnerships(agentId) {
   return await Partnership.find({ agent: agentId })
-    .populate('project', 'title images price priceDisplay location category status statusLabel allowAgentAcquisition networkEnabled defaultCommissionRate availableUnitsCount')
-    .populate('builder', 'name email phone companyName builderProfile')
-    .sort({ createdAt: -1 });
+    .populate('project', 'title images price priceDisplay location category propertyType purpose bhk area status statusLabel allowAgentAcquisition networkEnabled defaultCommissionRate availableUnitsCount')
+    .populate('builder', 'name companyName role reraNumber')
+    .sort({ createdAt: -1 })
+    .limit(300)
+    .lean();
 }
 
 /**
- * Get all partnerships for a builder (all projects or specific project)
+ * Get all partnerships for a seller (builder or owner)
  */
 async function getBuilderPartnerships(builderId, projectId = null) {
   const query = { builder: builderId };
@@ -212,9 +226,11 @@ async function getBuilderPartnerships(builderId, projectId = null) {
   }
 
   return await Partnership.find(query)
-    .populate('agent', 'name email phone reraNumber agencyName reraCertificate agentProfile')
-    .populate('project', 'title priceDisplay location category allowAgentAcquisition networkEnabled images')
-    .sort({ createdAt: -1 });
+    .populate('agent', 'name email phone reraNumber agencyName')
+    .populate('project', 'title priceDisplay location category propertyType purpose bhk area allowAgentAcquisition networkEnabled images')
+    .sort({ createdAt: -1 })
+    .limit(300)
+    .lean();
 }
 
 module.exports = {

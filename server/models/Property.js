@@ -135,8 +135,17 @@ const propertySchema = new mongoose.Schema(
       min: [0, 'Available units cannot be negative'],
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  }
 );
+
+// Virtual alias 'user' pointing to 'builder' (seller)
+propertySchema.virtual('user').get(function () {
+  return this.builder;
+});
 
 // Synchronize allowAgentAcquisition with legacy networkEnabled
 propertySchema.pre('save', function (next) {
@@ -170,5 +179,7 @@ propertySchema.index({ 'location.city': 1, isActive: 1 });
 propertySchema.index({ price: 1, isActive: 1 });
 propertySchema.index({ type: 1, isActive: 1 });
 propertySchema.index({ bhk: 1, isActive: 1 });
+propertySchema.index({ status: 1, isActive: 1 });
+propertySchema.index({ purpose: 1, isActive: 1 });
 
 module.exports = mongoose.model('Property', propertySchema);

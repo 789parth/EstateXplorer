@@ -41,4 +41,5 @@ const CityCard = ({ city }) => {
   );
 };
 
-export default CityCard;
+export default React.memo(CityCard);
+

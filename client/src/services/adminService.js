@@ -49,3 +49,23 @@ export const toggleBlockUserApi = async (id, isBlocked, reason = '') => {
   return response.data;
 };
 
+export const getKycRequestsApi = async (status = '', role = '') => {
+  const params = new URLSearchParams();
+  if (status) params.append('status', status);
+  if (role) params.append('role', role);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await api.get(`/admin/kyc-requests${query}`);
+  return response.data;
+};
+
+export const approveKycRequestApi = async (userId) => {
+  const response = await api.patch(`/admin/kyc-requests/${userId}/approve`);
+  return response.data;
+};
+
+export const rejectKycRequestApi = async (userId, rejectionReason = '') => {
+  const response = await api.patch(`/admin/kyc-requests/${userId}/reject`, { rejectionReason });
+  return response.data;
+};
+
+

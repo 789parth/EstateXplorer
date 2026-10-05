@@ -220,4 +220,4 @@ const PropertyCard = ({ property, onBookVisit, isBooked = false }) => {
 );
 };
 
-export default PropertyCard;
+export default React.memo(PropertyCard);

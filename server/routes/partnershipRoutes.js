@@ -17,9 +17,9 @@ router.post('/request', protect, authorize('agent'), requestPartnership);
 router.get('/my-partnerships', protect, authorize('agent'), getMyPartnerships);
 router.get('/project/:projectId', protect, authorize('agent'), getProjectPartnership);
 
-// Builder specific routes
-router.get('/builder-partnerships', protect, authorize('builder', 'admin'), getBuilderPartnerships);
-router.patch('/:id/status', protect, authorize('builder', 'admin'), updatePartnershipStatus);
-router.post('/bulk-approve', protect, authorize('builder', 'admin'), bulkApprovePartnerships);
+// Seller (Builder & Owner) specific routes
+router.get('/builder-partnerships', protect, authorize('builder', 'owner', 'admin'), getBuilderPartnerships);
+router.patch('/:id/status', protect, authorize('builder', 'owner', 'admin'), updatePartnershipStatus);
+router.post('/bulk-approve', protect, authorize('builder', 'owner', 'admin'), bulkApprovePartnerships);
 
 module.exports = router;

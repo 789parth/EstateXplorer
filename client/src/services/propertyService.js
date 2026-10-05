@@ -1,8 +1,20 @@
 import api from './api';
 
 // High-speed client-side in-memory cache with Stale-While-Revalidate (0ms instant UI rendering)
+// Capped at MAX_CACHE_SIZE entries via FIFO eviction to prevent unbounded memory growth
 const clientCache = new Map();
 const CLIENT_CACHE_TTL = 120 * 1000; // 2 minutes fresh TTL
+const MAX_CACHE_SIZE = 50; // prevent unbounded growth across long sessions
+
+function cacheSet(key, value) {
+  if (clientCache.has(key)) {
+    clientCache.delete(key); // refresh position
+  } else if (clientCache.size >= MAX_CACHE_SIZE) {
+    // FIFO eviction: remove oldest inserted entry
+    clientCache.delete(clientCache.keys().next().value);
+  }
+  clientCache.set(key, value);
+}
 
 export const invalidateClientPropertyCache = () => {
   clientCache.clear();
@@ -28,7 +40,7 @@ export const getProperties = async (params = {}, options = { useCache: true }) =
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
       api.get('/properties', { params }).then((res) => {
         if (res.data && res.data.success) {
-          clientCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
+          cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
       }).catch(() => {});
     }
@@ -37,7 +49,7 @@ export const getProperties = async (params = {}, options = { useCache: true }) =
 
   const response = await api.get('/properties', { params });
   if (response.data && response.data.success) {
-    clientCache.set(cacheKey, { data: response.data, timestamp: now });
+    cacheSet(cacheKey, { data: response.data, timestamp: now });
   }
   return response.data;
 };
@@ -52,7 +64,7 @@ export const getProperty = async (id, options = { useCache: true }) => {
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
       api.get(`/properties/${id}`).then((res) => {
         if (res.data && res.data.success) {
-          clientCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
+          cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
       }).catch(() => {});
     }
@@ -61,8 +73,13 @@ export const getProperty = async (id, options = { useCache: true }) => {
 
   const response = await api.get(`/properties/${id}`);
   if (response.data && response.data.success) {
-    clientCache.set(cacheKey, { data: response.data, timestamp: now });
+    cacheSet(cacheKey, { data: response.data, timestamp: now });
   }
+  return response.data;
+};
+
+export const recordPropertyAttribution = async (id, agentCode) => {
+  const response = await api.get(`/properties/${id}/attribution`, { params: { agent: agentCode } });
   return response.data;
 };
 
@@ -76,7 +93,7 @@ export const getFeaturedProperties = async (category = 'property', options = { u
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
       api.get('/properties/featured', { params: { category } }).then((res) => {
         if (res.data && res.data.success) {
-          clientCache.set(cacheKey, { data: res.data, timestamp: Date.now() });
+          cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
       }).catch(() => {});
     }
@@ -85,7 +102,7 @@ export const getFeaturedProperties = async (category = 'property', options = { u
 
   const response = await api.get('/properties/featured', { params: { category } });
   if (response.data && response.data.success) {
-    clientCache.set(cacheKey, { data: response.data, timestamp: now });
+    cacheSet(cacheKey, { data: response.data, timestamp: now });
   }
   return response.data;
 };

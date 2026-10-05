@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import gsap from 'gsap';
 import SearchCard from './SearchCard';
 
 const Hero = () => {
@@ -8,21 +7,24 @@ const Hero = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const ctx = gsap.context(() => {
-      gsap.fromTo(
-        '.hero-animate',
-        { opacity: 0, y: 30 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: 0.8,
-          stagger: 0.15,
-          ease: 'power3.out',
-        }
-      );
-    }, heroRef);
+    let ctx;
+    import('gsap').then(({ default: gsap }) => {
+      ctx = gsap.context(() => {
+        gsap.fromTo(
+          '.hero-animate',
+          { opacity: 0, y: 30 },
+          {
+            opacity: 1,
+            y: 0,
+            duration: 0.8,
+            stagger: 0.15,
+            ease: 'power3.out',
+          }
+        );
+      }, heroRef);
+    }).catch(() => {});
 
-    return () => ctx.revert();
+    return () => ctx?.revert();
   }, []);
 
   const handleSearch = (searchData) => {
@@ -89,4 +91,5 @@ const Hero = () => {
   );
 };
 
-export default Hero;
+export default React.memo(Hero);
+

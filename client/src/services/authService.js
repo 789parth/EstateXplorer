@@ -20,6 +20,11 @@ export const loginUser = async (credentials) => {
   return response.data;
 };
 
+export const adminLoginUser = async (credentials) => {
+  const response = await api.post('/auth/admin-secure-login', credentials);
+  return response.data;
+};
+
 export const logoutUser = async () => {
   const response = await api.post('/auth/logout');
   return response.data;
@@ -125,4 +130,15 @@ export const sendTestEmailApi = async (email) => {
   const response = await api.post('/notifications/test-email', { email });
   return response.data;
 };
+
+export const submitKycDocumentsApi = async (kycPayload) => {
+  const response = await api.post('/auth/kyc/submit', kycPayload);
+  return response.data;
+};
+
+export const getKycStatusApi = async () => {
+  const response = await api.get('/auth/kyc/status');
+  return response.data;
+};
+
 

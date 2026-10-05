@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Briefcase, Users, Eye, Award, Phone, Mail, MapPin, Trash2, CheckCircle2, ArrowLeft, Calendar } from 'lucide-react';
+import { Briefcase, Users, Eye, Award, Phone, Mail, MapPin, Trash2, CheckCircle2, ArrowLeft, Calendar, Compass } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { updateProfileApi } from '../../services/authService';
 import { getMyProperties, getMyInquiries } from '../../services/propertyService';
+import { getMyPartnerships, discoverProjects } from '../../services/partnershipService';
 import { formatPhoneNumber, formatTitleCase, formatCode, sanitizeInput, isValidIndianMobile } from '../../utils/formatters';
 import { INDIAN_STATES } from '../../utils/indianStates';
 import RoleManagementSection from '../../components/dashboard/RoleManagementSection';
@@ -58,14 +59,18 @@ const AgentProfile = () => {
   const [propertiesCount, setPropertiesCount] = useState(0);
   const [inquiriesCount, setInquiriesCount] = useState(0);
   const [visitCount, setVisitCount] = useState(0);
+  const [affiliationsCount, setAffiliationsCount] = useState(0);
+  const [discoverProjectsCount, setDiscoverProjectsCount] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
     const fetchCounts = async () => {
       try {
-        const [propsRes, inqsRes] = await Promise.allSettled([
+        const [propsRes, inqsRes, partRes, discoverRes] = await Promise.allSettled([
           getMyProperties(),
           getMyInquiries(),
+          getMyPartnerships(),
+          discoverProjects(),
         ]);
 
         if (isMounted) {
@@ -76,6 +81,13 @@ const AgentProfile = () => {
             const inqs = inqsRes.value.data;
             setInquiriesCount(inqs.length);
             setVisitCount(inqs.filter((e) => e.status === 'visit').length);
+          }
+          if (partRes.status === 'fulfilled' && partRes.value?.success && Array.isArray(partRes.value.data)) {
+            const approved = partRes.value.data.filter(p => p.status === 'approved' || p.status === 'accepted');
+            setAffiliationsCount(approved.length);
+          }
+          if (discoverRes.status === 'fulfilled' && discoverRes.value?.success && Array.isArray(discoverRes.value.data)) {
+            setDiscoverProjectsCount(discoverRes.value.data.length);
           }
         }
       } catch (err) {
@@ -151,14 +163,14 @@ const AgentProfile = () => {
   const agencyName = user?.agentProfile?.agencyName || user?.name || 'Agent Account';
 
   return (
-    <div className="builder-wrapper">
+    <div className="builder-wrapper agent-wrapper">
       {/* SIDEBAR - 100% Consistent with AgentDashboard */}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <div className="logo-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
-              <polyline points="9 22 9 12 15 12 15 22"/>
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
             </svg>
           </div>
           <div>
@@ -171,7 +183,7 @@ const AgentProfile = () => {
           <div className="nav-section">
             <div className="nav-section-label">Main</div>
             <Link className="nav-item" to="/dashboard?tab=overview">
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></svg>
               Dashboard
             </Link>
           </div>
@@ -185,7 +197,7 @@ const AgentProfile = () => {
             </Link>
             <Link className="nav-item" to="/dashboard?tab=leads">
               <Users size={18} />
-              Buyer Leads
+              Property Inquiries
               {inquiriesCount > 0 && <span className="badge">{inquiriesCount}</span>}
             </Link>
             <Link className="nav-item" to="/dashboard?tab=visits">
@@ -195,15 +207,32 @@ const AgentProfile = () => {
             </Link>
           </div>
 
+          <div className="nav-section">
+            <div className="nav-section-label">Acquisitions</div>
+            <Link className="nav-item" to="/dashboard?tab=find-projects">
+              <Compass size={18} />
+              <span className="nav-text">Find Projects &amp; Properties</span>
+              {discoverProjectsCount > 0 && (
+                <span className="badge info">{discoverProjectsCount}</span>
+              )}
+            </Link>
+            <Link className="nav-item" to="/dashboard?tab=affiliations">
+              <Award size={18} />
+              <span>My Affiliations</span>
+              {affiliationsCount > 0 && (
+                <span className="badge success">{affiliationsCount}</span>
+              )}
+            </Link>
+          </div>
 
           <div className="nav-section">
             <div className="nav-section-label">Account</div>
             <Link className="nav-item active" to="/dashboard/profile">
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              Agency Profile
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+              Agent Profile
             </Link>
             <Link className="nav-item" to="/">
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" /></svg>
               Homepage
             </Link>
             <Link className="nav-item" to="/listings">
@@ -214,7 +243,7 @@ const AgentProfile = () => {
               className="nav-item w-full text-left bg-transparent border-0"
               onClick={logout}
             >
-              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
               Sign Out
             </button>
           </div>

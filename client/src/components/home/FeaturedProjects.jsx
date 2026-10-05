@@ -93,4 +93,5 @@ const FeaturedProjects = ({ onExplore }) => {
   );
 };
 
-export default FeaturedProjects;
+export default React.memo(FeaturedProjects);
+

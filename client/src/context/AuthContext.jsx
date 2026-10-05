@@ -1,7 +1,8 @@
-import React, { createContext, useState, useEffect, useCallback } from 'react';
-import { setAccessTokenInMemory } from '../services/api';
+import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { setAccessTokenInMemory, getAccessTokenFromMemory } from '../services/api';
 import {
   loginUser,
+  adminLoginUser,
   registerUser,
   logoutUser,
   getCurrentUser,
@@ -48,13 +49,15 @@ export const AuthProvider = ({ children }) => {
     return null;
   }, []);
 
-  // Real-time synchronization for role updates, auth changes, and window focus
+  // Real-time synchronization for role updates, auth changes, and window focus (active sessions only)
   useRealtimeSync(
     [SYNC_EVENTS.ROLES, SYNC_EVENTS.AUTH],
     async () => {
-      await refreshUser();
+      if (user || getAccessTokenFromMemory()) {
+        await refreshUser();
+      }
     },
-    { revalidateOnFocus: true, intervalMs: 12000 }
+    { revalidateOnFocus: true, intervalMs: 60000 }
   );
 
   // Try loading user session via cookie / refresh on app load
@@ -119,6 +122,36 @@ export const AuthProvider = ({ children }) => {
         success: false,
         notRegistered: isNotRegistered,
         email: error.response?.data?.email || credentials?.email,
+        message: msg,
+      };
+    }
+  };
+
+  const handleAdminLogin = async (credentials) => {
+    try {
+      const res = await adminLoginUser(credentials);
+      if (res.require2FA) {
+        return {
+          success: true,
+          require2FA: true,
+          email: res.email,
+          role: 'admin',
+          message: res.message,
+        };
+      }
+      if (res.success) {
+        setUser(res.data.user);
+        setAccessToken(res.data.accessToken);
+        setAccessTokenInMemory(res.data.accessToken);
+        broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'login', user: res.data.user });
+        showToast(`Welcome Administrator, ${res.data.user.name}!`, 'success');
+        return { success: true };
+      }
+    } catch (error) {
+      const msg = error.response?.data?.message || 'Administrative login failed. Access denied.';
+      showToast(msg, 'error');
+      return {
+        success: false,
         message: msg,
       };
     }
@@ -345,32 +378,39 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const contextValue = useMemo(
+    () => ({
+      user,
+      accessToken,
+      loading,
+      isAuthenticated: !!user,
+      login: handleLogin,
+      adminLogin: handleAdminLogin,
+      verify2FALogin: handleVerify2FALogin,
+      resend2FA: handleResend2FA,
+      register: handleRegister,
+      sendRegistrationOtp: handleSendRegistrationOtp,
+      verifyRegistrationOtp: handleVerifyRegistrationOtp,
+      googleLogin: handleGoogleLogin,
+      logout: handleLogout,
+      updateProfile: handleUpdateProfile,
+      deleteAccount: handleDeleteAccount,
+      switchRole: handleSwitchRole,
+      requestRole: handleRequestRole,
+      getMyRoleRequests: handleGetMyRoleRequests,
+      refreshUser,
+      toastMessage,
+      showToast,
+      hideToast,
+      setUser,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, accessToken, loading, toastMessage]
+  );
+
   return (
     <AuthContext.Provider
-      value={{
-        user,
-        accessToken,
-        loading,
-        isAuthenticated: !!user,
-        login: handleLogin,
-        verify2FALogin: handleVerify2FALogin,
-        resend2FA: handleResend2FA,
-        register: handleRegister,
-        sendRegistrationOtp: handleSendRegistrationOtp,
-        verifyRegistrationOtp: handleVerifyRegistrationOtp,
-        googleLogin: handleGoogleLogin,
-        logout: handleLogout,
-        updateProfile: handleUpdateProfile,
-        deleteAccount: handleDeleteAccount,
-        switchRole: handleSwitchRole,
-        requestRole: handleRequestRole,
-        getMyRoleRequests: handleGetMyRoleRequests,
-        refreshUser,
-        toastMessage,
-        showToast,
-        hideToast,
-        setUser,
-      }}
+      value={contextValue}
     >
       {children}
     </AuthContext.Provider>

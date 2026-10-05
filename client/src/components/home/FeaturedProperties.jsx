@@ -98,4 +98,5 @@ const FeaturedProperties = ({ onBookVisit, onViewDetails, bookedPropertyIds = []
   );
 };
 
-export default FeaturedProperties;
+export default React.memo(FeaturedProperties);
+

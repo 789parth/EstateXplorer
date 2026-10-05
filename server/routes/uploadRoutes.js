@@ -31,7 +31,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit to support high-quality photos and videos
+  limits: { fileSize: 10 * 1024 * 1024 }, // Product upload limit: 10MB per file
   fileFilter,
 });
 

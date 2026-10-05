@@ -56,7 +56,7 @@ const Input = React.forwardRef(
               paddingRight: isPassword ? '42px' : '14px',
               ...style,
             }}
-            className={`w-full bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 py-2.5 outline-none transition-all duration-200 shadow-2xs focus:border-blue-600 focus:ring-3 focus:ring-blue-600/15 ${
+            className={`w-full bg-white border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 py-2.5 outline-none transition-all duration-200 shadow-2xs focus:border-blue-600 focus:ring-3 focus:ring-blue-600/15 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 disabled:cursor-not-allowed ${
               error
                 ? 'border-rose-400 focus:border-rose-600 focus:ring-rose-600/15'
                 : 'hover:border-slate-400'
