@@ -43,8 +43,18 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// DB connection is established at server startup in server.js.
-// No per-request connection overhead needed.
+const connectDB = require('./config/db');
+
+// Ensure database connection for all environments (including Vercel serverless functions)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection error in request lifecycle:', err.message);
+    next(err);
+  }
+});
 
 // Middleware
 app.use(
