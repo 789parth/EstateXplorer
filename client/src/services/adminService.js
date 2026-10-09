@@ -58,13 +58,13 @@ export const getKycRequestsApi = async (status = '', role = '') => {
   return response.data;
 };
 
-export const approveKycRequestApi = async (userId) => {
-  const response = await api.patch(`/admin/kyc-requests/${userId}/approve`);
+export const approveKycRequestApi = async (userId, role = '') => {
+  const response = await api.patch(`/admin/kyc-requests/${userId}/approve`, { role });
   return response.data;
 };
 
-export const rejectKycRequestApi = async (userId, rejectionReason = '') => {
-  const response = await api.patch(`/admin/kyc-requests/${userId}/reject`, { rejectionReason });
+export const rejectKycRequestApi = async (userId, rejectionReason = '', role = '') => {
+  const response = await api.patch(`/admin/kyc-requests/${userId}/reject`, { rejectionReason, role });
   return response.data;
 };
 

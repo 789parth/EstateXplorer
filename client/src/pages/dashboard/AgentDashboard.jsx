@@ -55,6 +55,7 @@ import './BuilderDashboard.css';
 const AddPropertyModal = lazy(() => import('../../components/dashboard/AddPropertyModal'));
 const RequestSellingRightsModal = lazy(() => import('../../components/dashboard/RequestSellingRightsModal'));
 const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModal'));
+const BookingInvoiceModal = lazy(() => import('../../components/dashboard/BookingInvoiceModal'));
 const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
 const AgentDashboard = () => {
@@ -95,18 +96,21 @@ const AgentDashboard = () => {
       return;
     }
 
-    // MANDATORY KYC CHECK: Agent must be verified by Admin before adding new property
-    const kycStatus = user?.kycVerification?.status || 'unverified';
+    // MANDATORY KYC CHECK: Agent must be verified by Admin specifically for the Agent role
+    const agentKycObj = user?.roleKycVerification?.agent;
+    const fallbackKyc = user?.kycVerification?.roleAtSubmission === 'agent' ? user?.kycVerification : null;
+    const kycStatus = agentKycObj?.status || fallbackKyc?.status || 'unverified';
+
     if (kycStatus !== 'verified') {
       if (kycStatus === 'pending') {
         showToast('Your agent verification documents are under review by the Administrator.', 'info');
       } else if (kycStatus === 'rejected') {
         showToast(
-          `Document verification rejected: ${user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
+          `Agent document verification rejected: ${agentKycObj?.rejectionReason || fallbackKyc?.rejectionReason || 'Please re-upload clear documents.'}`,
           'error'
         );
       } else {
-        showToast('Mandatory document verification required before adding properties. Please upload your documents.', 'warning');
+        showToast('Mandatory Agent document verification required before managing or adding properties. Please upload your documents.', 'warning');
       }
       setShowKycModal(true);
       return;
@@ -124,6 +128,7 @@ const AgentDashboard = () => {
   const [selectedInquiryIds, setSelectedInquiryIds] = useState([]);
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [bookingLead, setBookingLead] = useState(null);
+  const [invoiceBookingId, setInvoiceBookingId] = useState(null);
 
   // Reschedule Modal state
   const [rescheduleItem, setRescheduleItem] = useState(null);
@@ -1396,15 +1401,40 @@ const AgentDashboard = () => {
 
                                 <td className="py-3 px-3 text-right whitespace-nowrap">
                                   <div className="flex items-center justify-end gap-2">
-                                    {lead.property?.category === 'project' && !lead.bookingRef && (
+                                    {lead.bookingRef && (
                                       <button
                                         type="button"
-                                        onClick={() => setBookingLead(lead)}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors"
+                                        onClick={() => setInvoiceBookingId(typeof lead.bookingRef === 'object' ? lead.bookingRef._id : lead.bookingRef)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 font-bold text-xs transition-colors cursor-pointer"
+                                        title="View official token payment invoice"
                                       >
-                                        Book unit
+                                        Invoice
                                       </button>
                                     )}
+                                    {lead.property?.category === 'project' && !lead.bookingRef && (() => {
+                                      const hasSiteVisitDone = Boolean(
+                                        lead.siteVisitCompleted ||
+                                        lead.lifecycleStage === 'site_visit_done' ||
+                                        (lead.visitRequested && lead.status === 'closed')
+                                      );
+
+                                      return hasSiteVisitDone ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setBookingLead(lead)}
+                                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-colors cursor-pointer"
+                                        >
+                                          Book unit
+                                        </button>
+                                      ) : (
+                                        <span
+                                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-400 font-semibold text-xs border border-slate-200 cursor-not-allowed"
+                                          title="At least 1 site visit must be completed before booking and collecting token amount."
+                                        >
+                                          Site Visit Required
+                                        </span>
+                                      );
+                                    })()}
                                     <button
                                       type="button"
                                       onClick={() => {
@@ -1547,16 +1577,33 @@ const AgentDashboard = () => {
                             </div>
                           </div>
 
-                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                             {isClosed ? (
                               <>
                                 <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
                                   <Check size={12} className="text-emerald-600" /> Completed
                                 </div>
+                                {visit.bookingRef ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setInvoiceBookingId(typeof visit.bookingRef === 'object' ? visit.bookingRef._id : visit.bookingRef)}
+                                    className="py-1.5 px-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors cursor-pointer"
+                                  >
+                                    Invoice
+                                  </button>
+                                ) : visit.property?.category === 'project' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBookingLead(visit)}
+                                    className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer"
+                                  >
+                                    Book Unit
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleOpenReschedule(visit)}
                                   disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                                  className="py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
                                 >
                                   Reschedule
                                 </button>
@@ -1795,7 +1842,24 @@ const AgentDashboard = () => {
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setRequestModalProject(item)}
+                                onClick={() => {
+                                  const agentKycObj = user?.roleKycVerification?.agent;
+                                  const fallbackKyc = user?.kycVerification?.roleAtSubmission === 'agent' ? user?.kycVerification : null;
+                                  const kycStatus = agentKycObj?.status || fallbackKyc?.status || 'unverified';
+
+                                  if (kycStatus !== 'verified') {
+                                    if (kycStatus === 'pending') {
+                                      showToast('Your agent verification documents are under review by the Administrator.', 'info');
+                                    } else if (kycStatus === 'rejected') {
+                                      showToast(`Agent document verification rejected: ${agentKycObj?.rejectionReason || fallbackKyc?.rejectionReason || 'Please re-upload clear documents.'}`, 'error');
+                                    } else {
+                                      showToast('Mandatory Agent document verification required before requesting selling rights. Please upload your documents.', 'warning');
+                                    }
+                                    setShowKycModal(true);
+                                    return;
+                                  }
+                                  setRequestModalProject(item);
+                                }}
                                 className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition-all"
                               >
                                 <ShieldCheck size={14} />
@@ -2266,9 +2330,12 @@ const AgentDashboard = () => {
             isOpen={showKycModal}
             onClose={() => setShowKycModal(false)}
             user={user}
+            targetRole="agent"
             showToast={showToast}
             onVerificationSubmitted={(kycData) => {
               if (user) {
+                if (!user.roleKycVerification) user.roleKycVerification = {};
+                user.roleKycVerification.agent = kycData;
                 user.kycVerification = kycData;
               }
             }}
@@ -2284,12 +2351,25 @@ const AgentDashboard = () => {
             lead={bookingLead}
             showToast={showToast}
             onClose={() => setBookingLead(null)}
-            onSuccess={() => {
+            onViewInvoice={(bId) => setInvoiceBookingId(bId)}
+            onSuccess={(data) => {
+              const bRef = data?.booking?._id || data?.booking || true;
               setInquiries((items) => items.map((item) => item._id === bookingLead?._id
-                ? { ...item, lifecycleStage: 'unit_booked', bookingRef: true }
+                ? { ...item, lifecycleStage: 'unit_booked', bookingRef: bRef }
                 : item));
               setBookingLead(null);
             }}
+          />
+        </Suspense>
+      )}
+
+      {/* Official Token Payment Invoice Modal */}
+      {Boolean(invoiceBookingId) && (
+        <Suspense fallback={null}>
+          <BookingInvoiceModal
+            isOpen={Boolean(invoiceBookingId)}
+            bookingId={invoiceBookingId}
+            onClose={() => setInvoiceBookingId(null)}
           />
         </Suspense>
       )}

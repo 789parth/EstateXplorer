@@ -57,6 +57,12 @@ const LoginForm = ({ onSuccess, onSwitchToRegister, onSwitchToForgot }) => {
       return;
     }
 
+    if (result?.isAdminAccount) {
+      // Per strict requirement: Only show pop up that user is invalid (admin cannot login through normal login), no persistent banner or other modals
+      setServerError('');
+      return;
+    }
+
     if (result?.success && onSuccess) {
       onSuccess();
     } else if (!result?.success && result?.message) {

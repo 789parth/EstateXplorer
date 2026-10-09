@@ -136,8 +136,8 @@ export const submitKycDocumentsApi = async (kycPayload) => {
   return response.data;
 };
 
-export const getKycStatusApi = async () => {
-  const response = await api.get('/auth/kyc/status');
+export const getKycStatusApi = async (role = '') => {
+  const response = await api.get('/auth/kyc/status', { params: role ? { role } : {} });
   return response.data;
 };
 

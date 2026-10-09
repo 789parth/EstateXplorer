@@ -26,3 +26,9 @@ export const markCommissionPaid = async (bookingId, transactionRef) => {
   const response = await api.patch(`/bookings/${bookingId}/commission-paid`, { transactionRef });
   return response.data;
 };
+
+export const getBookingInvoiceApi = async (bookingId) => {
+  const response = await api.get(`/bookings/${bookingId}/invoice`);
+  return response.data;
+};
+

@@ -71,6 +71,20 @@ async function bookUnit({
         throw err;
       }
 
+      // Mandatory Site Visit Gate: At least 1 site visit must be completed before booking & paying token
+      const hasCompletedSiteVisit = Boolean(
+        lead.siteVisitCompleted ||
+        lead.lifecycleStage === 'site_visit_done' ||
+        lead.lifecycleStage === 'token_paid' ||
+        (lead.visitRequested && lead.status === 'closed')
+      );
+
+      if (!hasCompletedSiteVisit && actorUser?.role !== 'admin') {
+        const err = new Error('At least 1 site visit must be completed for this buyer before the property can be booked and the token amount paid.');
+        err.statusCode = 400;
+        throw err;
+      }
+
       const candidateUnit = await ProjectUnit.findById(unitId).session(session);
       if (!candidateUnit) {
         const err = new Error('Unit not found in project inventory.');
@@ -134,7 +148,7 @@ async function bookUnit({
         { new: true, session }
       );
       if (!bookedUnit) {
-        const err = new Error('Unit is already booked or reserved by another transaction.');
+        const err = new Error('This unit is already booked. Please select another available unit.');
         err.statusCode = 409;
         throw err;
       }

@@ -5,6 +5,7 @@ const {
   getProjectUnits,
   bookUnit,
   getMyBookings,
+  getBookingInvoice,
   markCommissionPaid,
 } = require('../controllers/bookingController');
 const { protect, authorize } = require('../middleware/authMiddleware');
@@ -20,6 +21,9 @@ router.post('/book', protect, authorize('agent', 'builder', 'admin'), bookUnit);
 
 // Booking views
 router.get('/my-bookings', protect, getMyBookings);
+
+// Booking invoice view/download for property holder, buyer, agent, admin
+router.get('/:id/invoice', protect, getBookingInvoice);
 
 // Commission settlement
 router.patch('/:id/commission-paid', protect, authorize('builder', 'admin'), markCommissionPaid);

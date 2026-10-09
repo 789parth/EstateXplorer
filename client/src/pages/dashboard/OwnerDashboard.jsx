@@ -92,17 +92,18 @@ const OwnerDashboard = () => {
     }
 
     // MANDATORY KYC CHECK: Owner must be verified by Admin before adding new property
-    const kycStatus = user?.kycVerification?.status || 'unverified';
+    const ownerKyc = user?.roleKycVerification?.owner || (user?.role === 'owner' ? user?.kycVerification : null) || {};
+    const kycStatus = ownerKyc?.status || 'unverified';
     if (kycStatus !== 'verified') {
       if (kycStatus === 'pending') {
         showToast('Your owner verification documents are under review by the Administrator.', 'info');
       } else if (kycStatus === 'rejected') {
         showToast(
-          `Document verification rejected: ${user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
+          `Owner document verification rejected: ${ownerKyc?.rejectionReason || user?.kycVerification?.rejectionReason || 'Please re-upload clear documents.'}`,
           'error'
         );
       } else {
-        showToast('Mandatory document verification required before adding properties. Please upload your documents.', 'warning');
+        showToast('Mandatory document verification required before adding properties. Please upload your owner documents.', 'warning');
       }
       setShowKycModal(true);
       return;
@@ -937,7 +938,7 @@ const OwnerDashboard = () => {
                       </p>
                       <button
                         className="btn-primary text-xs py-1.5 px-3 inline-flex items-center gap-1"
-                        onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+                        onClick={() => handleOpenAddProperty(null)}
                       >
                         <Plus size={14} /> Post Property
                       </button>
@@ -1060,7 +1061,7 @@ const OwnerDashboard = () => {
                     </p>
                     <button
                       className="btn-primary text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
-                      onClick={() => { setEditProperty(null); setIsModalOpen(true); }}
+                      onClick={() => handleOpenAddProperty(null)}
                     >
                       <Plus size={14} /> Post New Property
                     </button>
@@ -1914,10 +1915,13 @@ const OwnerDashboard = () => {
             isOpen={showKycModal}
             onClose={() => setShowKycModal(false)}
             user={user}
+            targetRole="owner"
             showToast={showToast}
             onVerificationSubmitted={(kycData) => {
               if (user) {
                 user.kycVerification = kycData;
+                if (!user.roleKycVerification) user.roleKycVerification = {};
+                user.roleKycVerification.owner = kycData;
               }
             }}
           />

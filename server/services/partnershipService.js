@@ -17,10 +17,21 @@ function generateAgentCode() {
  * Agent requests selling rights for a master project
  */
 async function requestPartnership(agentId, projectId, message = '') {
-  // Verify agent exists and has agent role — fetch only needed fields
-  const agent = await User.findById(agentId).select('name email role roles').lean();
+  // Verify agent exists and has agent role — fetch verification status
+  const agent = await User.findById(agentId).select('name email role roles kycVerification roleKycVerification').lean();
   if (!agent || (agent.role !== 'agent' && !agent.roles?.includes('agent'))) {
     throw new Error('Only registered Channel Partner Agents can request selling rights.');
+  }
+
+  // Enforce Agent Document Verification Gate:
+  // Even if user has builder KYC verified, they CANNOT request selling rights without agent document verification
+  const agentKycStatus = agent.roleKycVerification?.agent?.status || (agent.kycVerification?.roleAtSubmission === 'agent' ? agent.kycVerification?.status : 'unverified');
+  if (agentKycStatus !== 'verified') {
+    const err = new Error('Agent document verification is mandatory before requesting selling rights or affiliate partnerships.');
+    err.statusCode = 403;
+    err.requiresKyc = true;
+    err.kycStatus = agentKycStatus;
+    throw err;
   }
 
   // Verify project or property exists and allows agent acquisition — fetch only needed fields

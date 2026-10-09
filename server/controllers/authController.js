@@ -60,9 +60,9 @@ exports.register = async (req, res, next) => {
       return next(
         new AppError(
           disposableCheck.publicMessage ||
-            (isMailboxOrDnsError
-              ? 'This email address does not exist or cannot receive emails. Please provide an active, existing email address.'
-              : 'Access Blocked: Temporary or disposable email addresses are not permitted. Please use a valid email address from a supported provider.'),
+          (isMailboxOrDnsError
+            ? 'This email address does not exist or cannot receive emails. Please provide an active, existing email address.'
+            : 'Access Blocked: Temporary or disposable email addresses are not permitted. Please use a valid email address from a supported provider.'),
           statusCode
         )
       );
@@ -184,9 +184,9 @@ exports.sendRegistrationOTP = async (req, res, next) => {
       return next(
         new AppError(
           disposableCheck.publicMessage ||
-            (isMailboxOrDnsError
-              ? 'This email address does not exist or cannot receive emails. Please provide an active, existing email address.'
-              : 'Access Blocked: Temporary or disposable email addresses are not permitted. Please use a valid email address from a supported provider.'),
+          (isMailboxOrDnsError
+            ? 'This email address does not exist or cannot receive emails. Please provide an active, existing email address.'
+            : 'Access Blocked: Temporary or disposable email addresses are not permitted. Please use a valid email address from a supported provider.'),
           statusCode
         )
       );
@@ -427,7 +427,7 @@ exports.login = async (req, res, next) => {
       return next(
         new AppError(
           user.blockedReason ||
-            'Access Blocked: Your account access has been suspended by an administrator. Please contact support.',
+          'Access Blocked: Your account access has been suspended by an administrator. Please contact support.',
           403
         )
       );
@@ -442,12 +442,11 @@ exports.login = async (req, res, next) => {
     // Administrator accounts are strictly forbidden from signing in through the public/standard login form.
     const isAdminAccount = user.role === 'admin' || user.roles.includes('admin') || role === 'admin';
     if (isAdminAccount) {
-      return next(
-        new AppError(
-          'Security Policy Violation: Administrator accounts cannot sign in through the public user login. Please access your dedicated Administrator Portal.',
-          403
-        )
-      );
+      return res.status(403).json({
+        success: false,
+        isAdminAccount: true,
+        message: 'The user is invalid. These credentials are not valid.',
+      });
     }
 
     // Role selection during login (buyer, builder, agent, owner only)
@@ -459,14 +458,13 @@ exports.login = async (req, res, next) => {
         user.roles.push(role);
       }
       user.role = role;
-      user.save().catch(() => {});
+      user.save().catch(() => { });
     } else if (role === 'admin') {
-      return next(
-        new AppError(
-          'Direct administrator login through public portal is not permitted. Please use Admin Login.',
-          403
-        )
-      );
+      return res.status(403).json({
+        success: false,
+        isAdminAccount: true,
+        message: 'The user is invalid. These credentials are not valid.',
+      });
     }
 
     // Two-Factor Authentication Check
@@ -620,7 +618,7 @@ exports.getMe = async (req, res, next) => {
     const approvedRoles = user.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer'];
     const activeRole = approvedRoles.includes(user.role) ? user.role : 'buyer';
     if (user.role !== activeRole) {
-      User.updateOne({ _id: user._id }, { $set: { role: activeRole } }).catch(() => {});
+      User.updateOne({ _id: user._id }, { $set: { role: activeRole } }).catch(() => { });
     }
 
     res.status(200).json({
@@ -923,7 +921,7 @@ exports.updateProfile = async (req, res, next) => {
       const cleanDigits = activePhone ? String(activePhone).replace(/\D/g, '') : '';
       const hasValidPhone = Boolean(cleanDigits.length === 10 && /^[6-9]\d{9}$/.test(cleanDigits));
       const isVerified = fieldsToUpdate.isPhoneVerified !== undefined ? fieldsToUpdate.isPhoneVerified : (req.user.isPhoneVerified || false);
-      
+
       // SMS notifications can only be enabled if user has a verified phone number
       if (Boolean(smsNotifications) && (!hasValidPhone || !isVerified)) {
         return next(new AppError('Phone verification required. Please verify your mobile number with OTP via Twilio before enabling SMS notifications.', 400));
@@ -931,7 +929,7 @@ exports.updateProfile = async (req, res, next) => {
       fieldsToUpdate.smsNotifications = Boolean(smsNotifications) && hasValidPhone && isVerified;
     }
     if (twoFactorEnabled !== undefined) fieldsToUpdate.twoFactorEnabled = Boolean(twoFactorEnabled);
-    
+
     if (builderProfile !== undefined) {
       const bp = { ...builderProfile };
       if (bp.companyName) bp.companyName = bp.companyName.trim();
@@ -1151,12 +1149,11 @@ exports.googleAuth = async (req, res, next) => {
       // STRICT ADMIN SEGREGATION:
       const isAdminAccount = user.role === 'admin' || user.roles.includes('admin') || chosenRole === 'admin';
       if (isAdminAccount) {
-        return next(
-          new AppError(
-            'Security Policy Violation: Administrator accounts cannot sign in through public Google login. Please use the secure Administrator Portal.',
-            403
-          )
-        );
+        return res.status(403).json({
+          success: false,
+          isAdminAccount: true,
+          message: 'The user is invalid. These credentials are not valid.',
+        });
       }
 
       // Standard role handling for Google Sign-in (buyer, builder, agent, owner only):
@@ -1798,8 +1795,9 @@ exports.submitKycDocuments = async (req, res, next) => {
       return next(new AppError('User not found', 404));
     }
 
-    const role = req.user.role;
-    if (!['builder', 'agent', 'owner'].includes(role)) {
+    // Target role for this submission (explicitly provided or active user role)
+    const targetRole = req.body.role || req.user.role;
+    if (!['builder', 'agent', 'owner'].includes(targetRole)) {
       return next(new AppError('Only Builders, Agents, and Owners are required to submit property documents', 400));
     }
 
@@ -1813,17 +1811,9 @@ exports.submitKycDocuments = async (req, res, next) => {
       return next(new AppError('PAN Card document upload is mandatory.', 400));
     }
 
-    // Role-specific mandatory checks
-    if (role === 'builder' && companyDoc && companyDoc.url) {
-      // Company verification doc supplied or optional
-    }
-    if (role === 'agent' && agencyDoc && agencyDoc.url) {
-      // Agency verification doc supplied or optional
-    }
-
-    user.kycVerification = {
+    // Role-specific document submission object
+    const roleDocSubmission = {
       status: 'pending',
-      roleAtSubmission: role,
       submittedAt: new Date(),
       reviewedAt: null,
       reviewedBy: null,
@@ -1843,24 +1833,47 @@ exports.submitKycDocuments = async (req, res, next) => {
       companyDoc: {
         number: companyDoc?.number ? companyDoc.number.trim() : '',
         url: companyDoc?.url ? companyDoc.url.trim() : '',
-        name: companyDoc?.name || (role === 'builder' ? 'Company Verification' : ''),
+        name: companyDoc?.name || (targetRole === 'builder' ? 'Company Verification' : ''),
         status: companyDoc?.url ? 'pending' : 'unverified',
       },
       agencyDoc: {
         number: agencyDoc?.number ? agencyDoc.number.trim() : '',
         url: agencyDoc?.url ? agencyDoc.url.trim() : '',
-        name: agencyDoc?.name || (role === 'agent' ? 'Agency Verification' : ''),
+        name: agencyDoc?.name || (targetRole === 'agent' ? 'Agency Verification' : ''),
         status: agencyDoc?.url ? 'pending' : 'unverified',
       },
+    };
+
+    // Ensure roleKycVerification object is initialized
+    if (!user.roleKycVerification) {
+      user.roleKycVerification = {
+        builder: { status: 'unverified' },
+        agent: { status: 'unverified' },
+        owner: { status: 'unverified' },
+      };
+    }
+
+    // Update role-specific verification
+    user.roleKycVerification[targetRole] = {
+      ...user.roleKycVerification[targetRole],
+      ...roleDocSubmission,
+    };
+
+    // Also update legacy kycVerification for backwards compatibility
+    user.kycVerification = {
+      ...roleDocSubmission,
+      roleAtSubmission: targetRole,
     };
 
     await user.save();
 
     res.status(200).json({
       success: true,
-      message: 'KYC documents submitted successfully. Admin review is pending.',
+      message: `${targetRole.charAt(0).toUpperCase() + targetRole.slice(1)} KYC documents submitted successfully. Admin review is pending.`,
       data: {
-        kycVerification: user.kycVerification,
+        role: targetRole,
+        kycVerification: user.roleKycVerification[targetRole],
+        roleKycVerification: user.roleKycVerification,
       },
     });
   } catch (error) {
@@ -1874,17 +1887,27 @@ exports.submitKycDocuments = async (req, res, next) => {
 exports.getKycStatus = async (req, res, next) => {
   try {
     const userId = req.user.id || req.user._id;
-    const user = await User.findById(userId).select('kycVerification role').lean();
+    const user = await User.findById(userId).select('kycVerification roleKycVerification role roles').lean();
 
     if (!user) {
       return next(new AppError('User not found', 404));
     }
 
+    const currentRole = req.query.role || req.user.role || 'builder';
+    const roleKyc = user.roleKycVerification || {};
+    const currentRoleKyc = roleKyc[currentRole] || (user.kycVerification?.roleAtSubmission === currentRole ? user.kycVerification : { status: 'unverified' });
+
     res.status(200).json({
       success: true,
       data: {
-        role: user.role,
-        kycVerification: user.kycVerification || { status: 'unverified' },
+        role: currentRole,
+        roles: user.roles || [user.role],
+        kycVerification: currentRoleKyc,
+        roleKycVerification: {
+          builder: roleKyc.builder || (user.kycVerification?.roleAtSubmission === 'builder' ? user.kycVerification : { status: 'unverified' }),
+          agent: roleKyc.agent || (user.kycVerification?.roleAtSubmission === 'agent' ? user.kycVerification : { status: 'unverified' }),
+          owner: roleKyc.owner || (user.kycVerification?.roleAtSubmission === 'owner' ? user.kycVerification : { status: 'unverified' }),
+        },
       },
     });
   } catch (error) {

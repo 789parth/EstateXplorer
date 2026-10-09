@@ -194,6 +194,38 @@ const userSchema = new mongoose.Schema(
         status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' },
       },
     },
+    // Role-specific independent document verifications (Builder, Agent, Owner)
+    roleKycVerification: {
+      builder: {
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified', index: true },
+        submittedAt: { type: Date },
+        reviewedAt: { type: Date },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rejectionReason: { type: String, default: '' },
+        aadharCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+        panCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+        companyDoc: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+      },
+      agent: {
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified', index: true },
+        submittedAt: { type: Date },
+        reviewedAt: { type: Date },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rejectionReason: { type: String, default: '' },
+        aadharCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+        panCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+        agencyDoc: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+      },
+      owner: {
+        status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified', index: true },
+        submittedAt: { type: Date },
+        reviewedAt: { type: Date },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rejectionReason: { type: String, default: '' },
+        aadharCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+        panCard: { number: { type: String, default: '' }, url: { type: String, default: '' }, name: { type: String, default: '' }, status: { type: String, enum: ['unverified', 'pending', 'verified', 'rejected'], default: 'unverified' } },
+      },
+    },
   },
   { timestamps: true }
 );

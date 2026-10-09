@@ -41,6 +41,9 @@ async function runTests() {
       phone: agentPhone,
       agencyName: 'Topline Realty Partners',
       reraNumber: 'RERA-TEST-998877',
+      roleKycVerification: {
+        agent: { status: 'verified' },
+      },
     });
 
     // 3. Create Individual Property with allowAgentAcquisition: true

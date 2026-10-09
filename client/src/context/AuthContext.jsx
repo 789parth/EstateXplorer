@@ -114,6 +114,12 @@ export const AuthProvider = ({ children }) => {
         error.response?.data?.message?.toLowerCase().includes('not registered') ||
         error.response?.data?.message?.toLowerCase().includes('no account found')
       );
+      const isAdminAccount = Boolean(
+        error.response?.data?.isAdminAccount ||
+        (error.response?.data?.message &&
+          /admin/i.test(error.response.data.message) &&
+          /invalid|normal login|dedicated/i.test(error.response.data.message))
+      );
       const msg = error.response?.data?.message || 'Login failed. Please check your credentials.';
       if (!isNotRegistered) {
         showToast(msg, 'error');
@@ -121,6 +127,7 @@ export const AuthProvider = ({ children }) => {
       return {
         success: false,
         notRegistered: isNotRegistered,
+        isAdminAccount,
         email: error.response?.data?.email || credentials?.email,
         message: msg,
       };

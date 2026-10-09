@@ -61,6 +61,11 @@ const sendTokenResponse = (user, statusCode, res, message = 'Success') => {
     agentProfile: user.agentProfile,
     ownerProfile: user.ownerProfile,
     kycVerification: user.kycVerification || { status: 'unverified' },
+    roleKycVerification: user.roleKycVerification || {
+      builder: { status: 'unverified' },
+      agent: { status: 'unverified' },
+      owner: { status: 'unverified' },
+    },
     createdAt: user.createdAt,
   };
 

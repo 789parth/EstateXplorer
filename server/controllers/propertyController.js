@@ -57,36 +57,43 @@ exports.createProperty = async (req, res, next) => {
     }
 
     // MANDATORY DOCUMENT VERIFICATION GATE (Spec §KYC):
-    // Builder, Agent, and Owner MUST have their essential documents verified by Admin before adding property/project.
+    // Builder, Agent, and Owner MUST have their essential documents verified by Admin for their specific role before adding property/project.
     if (['builder', 'agent', 'owner'].includes(req.user.role)) {
-      const userDoc = await User.findById(currentUserId).select('kycVerification');
-      const kycStatus = userDoc?.kycVerification?.status || 'unverified';
+      const activePostingRole = req.user.role;
+      const userDoc = await User.findById(currentUserId).select('kycVerification roleKycVerification');
+      
+      const roleKycObj = userDoc?.roleKycVerification?.[activePostingRole];
+      const fallbackKyc = userDoc?.kycVerification?.roleAtSubmission === activePostingRole ? userDoc.kycVerification : null;
+      const kycStatus = roleKycObj?.status || fallbackKyc?.status || 'unverified';
 
       if (kycStatus !== 'verified') {
-        const roleLabel = req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1);
+        const roleLabel = activePostingRole.charAt(0).toUpperCase() + activePostingRole.slice(1);
         if (kycStatus === 'pending') {
           return res.status(403).json({
             success: false,
             requiresKyc: true,
             kycStatus: 'pending',
-            message: `Your ${roleLabel} verification documents are pending administrator review. You will be able to add properties and projects once approved.`,
+            role: activePostingRole,
+            message: `Your ${roleLabel} verification documents are pending administrator review. You will be able to add ${activePostingRole === 'builder' ? 'projects' : 'properties'} once approved for this role.`,
           });
         }
         if (kycStatus === 'rejected') {
-          const reason = userDoc?.kycVerification?.rejectionReason || 'Documents did not meet criteria';
+          const reason = roleKycObj?.rejectionReason || fallbackKyc?.rejectionReason || 'Documents did not meet criteria';
           return res.status(403).json({
             success: false,
             requiresKyc: true,
             kycStatus: 'rejected',
+            role: activePostingRole,
             rejectionReason: reason,
-            message: `Your verification documents were rejected: ${reason}. Please re-upload your mandatory documents to post properties.`,
+            message: `Your ${roleLabel} verification documents were rejected: ${reason}. Please re-upload your mandatory documents to post as a ${roleLabel}.`,
           });
         }
         return res.status(403).json({
           success: false,
           requiresKyc: true,
           kycStatus: 'unverified',
-          message: `Mandatory document verification required. As a ${roleLabel}, please upload and verify your Aadhar Card, PAN Card, and registration documents before adding properties or projects.`,
+          role: activePostingRole,
+          message: `Mandatory document verification required. As a ${roleLabel}, please upload and verify your Aadhar Card, PAN Card, and registration documents for the ${roleLabel} role before adding properties or projects.`,
         });
       }
     }
@@ -1089,6 +1096,19 @@ exports.updateInquiryStatus = async (req, res, next) => {
     inquiry.status = req.body.status || inquiry.status;
     if (req.body.lifecycleStage) {
       inquiry.lifecycleStage = req.body.lifecycleStage;
+    }
+    // If site visit was requested and marked closed or site_visit_done, mark site visit completed
+    if (
+      req.body.lifecycleStage === 'site_visit_done' ||
+      (inquiry.visitRequested && (req.body.status === 'closed' || inquiry.status === 'closed'))
+    ) {
+      inquiry.siteVisitCompleted = true;
+      if (!inquiry.siteVisitCompletedAt) {
+        inquiry.siteVisitCompletedAt = new Date();
+      }
+      if (!req.body.lifecycleStage && (inquiry.lifecycleStage === 'new' || inquiry.lifecycleStage === 'site_visit_scheduled')) {
+        inquiry.lifecycleStage = 'site_visit_done';
+      }
     }
     if (req.body.notes !== undefined) {
       inquiry.notes = req.body.notes;

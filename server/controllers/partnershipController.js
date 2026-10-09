@@ -96,7 +96,13 @@ exports.requestPartnership = async (req, res) => {
       data: partnership,
     });
   } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
+    const status = err.statusCode || 400;
+    res.status(status).json({
+      success: false,
+      requiresKyc: Boolean(err.requiresKyc),
+      kycStatus: err.kycStatus,
+      message: err.message,
+    });
   }
 };
 

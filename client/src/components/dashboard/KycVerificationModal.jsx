@@ -22,13 +22,14 @@ const KycVerificationModal = ({
   isOpen,
   onClose,
   user,
+  targetRole,
   onVerificationSubmitted,
   showToast,
 }) => {
-  const role = user?.role || 'builder';
+  const role = targetRole || user?.role || 'builder';
   const roleTitle = role.charAt(0).toUpperCase() + role.slice(1);
 
-  const existingKyc = user?.kycVerification || {};
+  const existingKyc = user?.roleKycVerification?.[role] || (user?.kycVerification?.roleAtSubmission === role ? user?.kycVerification : (user?.kycVerification || {}));
   const currentStatus = existingKyc.status || 'unverified';
 
   const [aadharNumber, setAadharNumber] = useState(existingKyc.aadharCard?.number || '');
@@ -94,6 +95,7 @@ const KycVerificationModal = ({
     setSubmitting(true);
     try {
       const payload = {
+        role,
         aadharCard: {
           number: aadharNumber.trim(),
           url: aadharUrl.trim(),
@@ -119,10 +121,10 @@ const KycVerificationModal = ({
       const res = await submitKycDocumentsApi(payload);
       if (res.success) {
         if (showToast) {
-          showToast('Verification documents submitted! Administrator will review shortly.', 'success');
+          showToast(`${roleTitle} verification documents submitted! Administrator will review shortly.`, 'success');
         }
         if (onVerificationSubmitted) {
-          onVerificationSubmitted(res.data?.kycVerification);
+          onVerificationSubmitted(res.data?.kycVerification, role);
         }
         onClose();
       }

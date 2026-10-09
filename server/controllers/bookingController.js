@@ -79,6 +79,14 @@ exports.createUnits = async (req, res) => {
       data: created,
     });
   } catch (err) {
+    if (err.code === 11000 || (err.message && err.message.includes('E11000 duplicate key'))) {
+      const match = err.message.match(/unitNumber:\s*"?([^",}]+)"?/);
+      const dupUnit = match ? match[1].trim() : '';
+      const dupMsg = dupUnit
+        ? `Units already created/exist for this tower. Unit "${dupUnit}" is already registered in inventory.`
+        : 'One or more units in this tower already exist in the project inventory.';
+      return res.status(409).json({ success: false, message: dupMsg });
+    }
     res.status(err.statusCode || 400).json({ success: false, message: err.message });
   }
 };
@@ -211,6 +219,121 @@ exports.getMyBookings = async (req, res) => {
 };
 
 /**
+ * @desc   Get Booking Invoice for Property/Project Holder, Buyer, or Agent
+ * @route  GET /api/bookings/:id/invoice
+ * @access Private (Builder, Agent, Buyer, Admin)
+ */
+exports.getBookingInvoice = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid booking ID.' });
+    }
+
+    const booking = await Booking.findById(id)
+      .populate('project', 'title type category location price priceDisplay images builder')
+      .populate('unit', 'unitNumber tower floor bhk carpetArea price')
+      .populate('builder', 'name email phone companyName reraNumber address avatar')
+      .populate('agent', 'name email phone agencyName agentCode avatar')
+      .populate('buyer', 'name email phone avatar')
+      .lean();
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found.' });
+    }
+
+    const currentUserId = String(req.user._id || req.user.id);
+    const isBuilder = booking.builder && String(booking.builder._id || booking.builder) === currentUserId;
+    const isAgent = booking.agent && String(booking.agent._id || booking.agent) === currentUserId;
+    const isBuyer = booking.buyer && String(booking.buyer._id || booking.buyer) === currentUserId;
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isBuilder && !isAgent && !isBuyer && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to view this booking invoice.',
+      });
+    }
+
+    const invoiceNumber = `INV-${booking.bookingNumber || booking._id.toString().toUpperCase().slice(-8)}`;
+    const agreementValue = Number(booking.agreementValue || 0);
+    const tokenAmountPaid = Number(booking.tokenAmount || 0);
+    const balanceDue = Math.max(0, agreementValue - tokenAmountPaid);
+
+    const invoice = {
+      invoiceNumber,
+      bookingNumber: booking.bookingNumber,
+      bookingId: booking._id,
+      date: booking.tokenPaymentDate || booking.createdAt,
+      status: booking.status || 'confirmed',
+      paymentStatus: tokenAmountPaid > 0 ? 'Token Paid' : 'Pending',
+
+      // Issuer / Property Holder details
+      issuer: {
+        name: booking.builder?.companyName || booking.builder?.name || 'Property Developer',
+        email: booking.builder?.email || '',
+        phone: booking.builder?.phone || '',
+        reraNumber: booking.builder?.reraNumber || '',
+        address: booking.builder?.address || '',
+      },
+
+      // Buyer details
+      buyer: {
+        name: booking.buyerName || booking.buyer?.name || 'Buyer',
+        email: booking.buyerEmail || booking.buyer?.email || '',
+        phone: booking.buyerPhone || booking.buyer?.phone || '',
+      },
+
+      // Attributed Agent (if any)
+      agent: booking.isAttributed && booking.agent ? {
+        name: booking.agent.name || '',
+        agencyName: booking.agent.agencyName || '',
+        agentCode: booking.agent.agentCode || '',
+        phone: booking.agent.phone || '',
+      } : null,
+
+      // Property & Unit specs
+      project: {
+        title: booking.project?.title || 'Project Property',
+        location: booking.project?.location || '',
+        type: booking.project?.type || 'Residential',
+      },
+      unit: {
+        unitNumber: booking.unit?.unitNumber || 'N/A',
+        tower: booking.unit?.tower || 'N/A',
+        floor: booking.unit?.floor ?? 'N/A',
+        bhk: booking.unit?.bhk ?? 'N/A',
+        carpetArea: booking.unit?.carpetArea ? `${booking.unit.carpetArea} sq.ft` : 'N/A',
+      },
+
+      // Financials
+      pricing: {
+        agreementValue,
+        tokenAmountPaid,
+        balanceDue,
+        currency: 'INR',
+        currencySymbol: '₹',
+      },
+
+      // Payment Details
+      payment: {
+        method: booking.paymentDetails?.method || 'Direct / Bank Transfer',
+        transactionRef: booking.paymentDetails?.transactionRef || 'OFFLINE-RECORD',
+        paidAt: booking.paymentDetails?.paidAt || booking.tokenPaymentDate || booking.createdAt,
+      },
+      notes: booking.notes || '',
+    };
+
+    res.status(200).json({
+      success: true,
+      data: invoice,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
  * @desc   Mark Commission as Paid
  * @route  PATCH /api/bookings/:id/commission-paid
  * @access Private (Builder, Admin)
@@ -228,3 +351,5 @@ exports.markCommissionPaid = async (req, res) => {
     res.status(err.statusCode || 400).json({ success: false, message: err.message });
   }
 };
+
+

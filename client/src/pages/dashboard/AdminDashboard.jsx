@@ -188,13 +188,14 @@ const AdminDashboard = () => {
     }
   }, [kycStatusFilter, kycRoleFilter]);
 
-  const handleApproveKyc = async (userId, userName) => {
+  const handleApproveKyc = async (userId, userName, role = null) => {
+    const loadingKey = role ? `${userId}-${role}` : userId;
     try {
-      setKycActionLoading(userId);
-      const res = await approveKycRequestApi(userId);
+      setKycActionLoading(loadingKey);
+      const res = await approveKycRequestApi(userId, role);
       if (res.success) {
         showToast(res.message || `KYC approved for ${userName}`, 'success');
-        broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'kyc_verified', userId });
+        broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'kyc_verified', userId, role });
         loadKyc();
       }
     } catch (err) {
@@ -208,14 +209,16 @@ const AdminDashboard = () => {
     if (!rejectKycModalItem) return;
     const userId = rejectKycModalItem._id;
     const userName = rejectKycModalItem.name;
+    const role = rejectKycModalItem.targetRole || rejectKycModalItem.role;
     const reason = rejectKycReason.trim();
+    const loadingKey = role ? `${userId}-${role}` : userId;
 
     try {
-      setKycActionLoading(userId);
-      const res = await rejectKycRequestApi(userId, reason);
+      setKycActionLoading(loadingKey);
+      const res = await rejectKycRequestApi(userId, reason, role);
       if (res.success) {
         showToast(res.message || `KYC rejected for ${userName}`, 'info');
-        broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'kyc_rejected', userId });
+        broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'kyc_rejected', userId, role });
         setRejectKycModalItem(null);
         setRejectKycReason('');
         loadKyc();
@@ -1241,12 +1244,16 @@ const AdminDashboard = () => {
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => handleApproveKyc(item._id, item.name)}
-                                    disabled={kycActionLoading === item._id}
+                                    onClick={() => handleApproveKyc(item._id, item.name, item.role)}
+                                    disabled={kycActionLoading === item._id || kycActionLoading === `${item._id}-${item.role}`}
                                     className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs disabled:opacity-50"
                                   >
                                     <Check size={13} />
-                                    <span>{kycActionLoading === item._id ? 'Approving...' : 'Approve Documents'}</span>
+                                    <span>
+                                      {kycActionLoading === item._id || kycActionLoading === `${item._id}-${item.role}`
+                                        ? 'Approving...'
+                                        : `Approve ${item.role ? item.role.charAt(0).toUpperCase() + item.role.slice(1) : ''}`}
+                                    </span>
                                   </button>
                                   <button
                                     type="button"
@@ -1254,7 +1261,7 @@ const AdminDashboard = () => {
                                       setRejectKycModalItem(item);
                                       setRejectKycReason('');
                                     }}
-                                    disabled={kycActionLoading === item._id}
+                                    disabled={kycActionLoading === item._id || kycActionLoading === `${item._id}-${item.role}`}
                                     className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
                                   >
                                     <X size={13} />
@@ -1275,7 +1282,8 @@ const AdminDashboard = () => {
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handleApproveKyc(item._id, item.name)}
+                                  onClick={() => handleApproveKyc(item._id, item.name, item.role)}
+                                  disabled={kycActionLoading === item._id || kycActionLoading === `${item._id}-${item.role}`}
                                   className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-semibold text-xs transition-colors cursor-pointer"
                                 >
                                   Re-approve
@@ -2242,7 +2250,7 @@ const AdminDashboard = () => {
               </div>
 
               <p className="text-xs text-slate-600 mb-3">
-                You are rejecting verification documents for <strong>{rejectKycModalItem.name}</strong> ({rejectKycModalItem.email}). They will be informed to re-upload.
+                You are rejecting <strong>{(rejectKycModalItem.targetRole || rejectKycModalItem.role || 'user').toUpperCase()}</strong> verification documents for <strong>{rejectKycModalItem.name}</strong> ({rejectKycModalItem.email}). They will be informed to re-upload.
               </p>
 
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">

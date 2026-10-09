@@ -145,6 +145,43 @@ async function runKycVerificationSuite() {
   assert.strictEqual(targetUser.kycVerification.panCard.status, 'verified', 'PAN marked verified');
   pass('Admin Approval Flow', 'Admin successfully verifies KYC documents');
 
+  // Test 5: Multi-role independent KYC invariant:
+  // User with verified Builder KYC CANNOT create property or request selling rights as Agent without Agent KYC verification
+  const multiRoleUser = {
+    _id: '507f1f77bcf86cd799439099',
+    name: 'Multi Role User',
+    email: 'multi@example.com',
+    role: 'agent',
+    roles: ['builder', 'agent', 'owner'],
+    kycVerification: {
+      status: 'verified',
+      roleAtSubmission: 'builder', // Builder KYC is verified
+    },
+    roleKycVerification: {
+      builder: { status: 'verified' },
+      agent: { status: 'unverified' }, // Agent KYC is NOT verified
+      owner: { status: 'unverified' },
+    },
+  };
+
+  User.findById = (id) => ({
+    select: () => Promise.resolve(multiRoleUser),
+  });
+
+  const agentPostReq = createMockReq(
+    { title: 'Agent Listing', category: 'property', price: 3000000 },
+    {},
+    {},
+    { id: '507f1f77bcf86cd799439099', role: 'agent' }
+  );
+  const agentPostRes = createMockRes();
+
+  await propertyController.createProperty(agentPostReq, agentPostRes, () => {});
+  assert.strictEqual(agentPostRes.statusCode, 403, 'Posting property as unverified agent must return 403');
+  assert.strictEqual(agentPostRes.data?.requiresKyc, true);
+  assert.strictEqual(agentPostRes.data?.role, 'agent');
+  pass('Multi-Role Independent KYC Invariant', 'Builder KYC does not grant Agent property posting rights without Agent KYC verification');
+
   // Restore mocks
   User.findById = origFindById;
 
@@ -155,3 +192,4 @@ runKycVerificationSuite().catch((err) => {
   console.error('❌ KYC Test Failed:', err);
   process.exit(1);
 });
+

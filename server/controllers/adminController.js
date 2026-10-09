@@ -510,120 +510,237 @@ exports.getKycRequests = async (req, res, next) => {
     const query = {};
 
     if (status && ['unverified', 'pending', 'verified', 'rejected'].includes(status)) {
-      query['kycVerification.status'] = status;
+      if (role && ['builder', 'agent', 'owner'].includes(role)) {
+        query[`roleKycVerification.${role}.status`] = status;
+      } else {
+        query.$or = [
+          { 'kycVerification.status': status },
+          { 'roleKycVerification.builder.status': status },
+          { 'roleKycVerification.agent.status': status },
+          { 'roleKycVerification.owner.status': status },
+        ];
+      }
     } else {
-      // By default list pending or all non-unverified submissions
-      query['kycVerification.status'] = { $in: ['pending', 'verified', 'rejected'] };
+      // By default list pending or all non-unverified submissions across any role
+      if (role && ['builder', 'agent', 'owner'].includes(role)) {
+        query[`roleKycVerification.${role}.status`] = { $in: ['pending', 'verified', 'rejected'] };
+      } else {
+        query.$or = [
+          { 'kycVerification.status': { $in: ['pending', 'verified', 'rejected'] } },
+          { 'roleKycVerification.builder.status': { $in: ['pending', 'verified', 'rejected'] } },
+          { 'roleKycVerification.agent.status': { $in: ['pending', 'verified', 'rejected'] } },
+          { 'roleKycVerification.owner.status': { $in: ['pending', 'verified', 'rejected'] } },
+        ];
+      }
     }
 
     if (role && ['builder', 'agent', 'owner'].includes(role)) {
-      query.role = role;
+      query.roles = role;
     }
 
     const users = await User.find(query)
-      .select('name email phone role kycVerification createdAt builderProfile agentProfile ownerProfile')
+      .select('name email phone role roles kycVerification roleKycVerification createdAt builderProfile agentProfile ownerProfile')
       .sort({ 'kycVerification.submittedAt': -1, createdAt: -1 })
       .lean();
 
+    // Map and unpack individual role KYC submissions so admin reviews each role independently
+    const items = [];
+    const rolesToCheck = role && ['builder', 'agent', 'owner'].includes(role)
+      ? [role]
+      : ['builder', 'agent', 'owner'];
+
+    for (const u of users) {
+      for (const r of rolesToCheck) {
+        const roleKyc = u.roleKycVerification?.[r];
+        // If role-specific KYC exists and matches the status filter
+        if (roleKyc && roleKyc.status && roleKyc.status !== 'unverified') {
+          if (!status || status === 'all' || roleKyc.status === status) {
+            items.push({
+              _id: u._id,
+              name: u.name,
+              email: u.email,
+              phone: u.phone,
+              role: r, // Target role for this verification
+              userRoles: u.roles || [u.role],
+              targetRole: r,
+              kycVerification: roleKyc,
+              createdAt: u.createdAt,
+            });
+          }
+        } else if (
+          // Backwards compatibility with single kycVerification
+          (!roleKyc || roleKyc.status === 'unverified') &&
+          u.kycVerification?.status &&
+          u.kycVerification.status !== 'unverified' &&
+          (u.kycVerification.roleAtSubmission === r || (!u.kycVerification.roleAtSubmission && u.role === r))
+        ) {
+          if (!status || status === 'all' || u.kycVerification.status === status) {
+            items.push({
+              _id: u._id,
+              name: u.name,
+              email: u.email,
+              phone: u.phone,
+              role: r,
+              userRoles: u.roles || [u.role],
+              targetRole: r,
+              kycVerification: u.kycVerification,
+              createdAt: u.createdAt,
+            });
+          }
+        }
+      }
+    }
+
     res.status(200).json({
       success: true,
-      count: users.length,
-      data: users,
+      count: items.length,
+      data: items,
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Approve user's submitted KYC documents
+// @desc    Approve user's submitted KYC documents (optionally for a specific role)
 // @route   PATCH /api/admin/kyc-requests/:userId/approve
 // @access  Private / Admin
 exports.approveKycRequest = async (req, res, next) => {
   try {
     const { userId } = req.params;
+    const targetRole = req.body?.role || req.query?.role;
     const targetUser = await User.findById(userId);
 
     if (!targetUser) {
       return next(new AppError('User not found', 404));
     }
 
-    if (!targetUser.kycVerification || !targetUser.kycVerification.status) {
-      return next(new AppError('User has not submitted KYC documents yet', 400));
+    const roleToApprove = targetRole || targetUser.kycVerification?.roleAtSubmission || targetUser.role;
+
+    if (!targetUser.roleKycVerification) {
+      targetUser.roleKycVerification = {
+        builder: { status: 'unverified' },
+        agent: { status: 'unverified' },
+        owner: { status: 'unverified' },
+      };
     }
 
-    targetUser.kycVerification.status = 'verified';
-    targetUser.kycVerification.reviewedAt = new Date();
-    targetUser.kycVerification.reviewedBy = req.user.id;
-    targetUser.kycVerification.rejectionReason = '';
+    const roleKyc = targetUser.roleKycVerification[roleToApprove] || {};
+    const fallbackKyc = targetUser.kycVerification || {};
 
-    if (targetUser.kycVerification.aadharCard?.url) {
-      targetUser.kycVerification.aadharCard.status = 'verified';
-    }
-    if (targetUser.kycVerification.panCard?.url) {
-      targetUser.kycVerification.panCard.status = 'verified';
-    }
-    if (targetUser.kycVerification.companyDoc?.url) {
-      targetUser.kycVerification.companyDoc.status = 'verified';
-    }
-    if (targetUser.kycVerification.agencyDoc?.url) {
-      targetUser.kycVerification.agencyDoc.status = 'verified';
+    const approvedObj = {
+      status: 'verified',
+      submittedAt: roleKyc.submittedAt || fallbackKyc.submittedAt || new Date(),
+      reviewedAt: new Date(),
+      reviewedBy: req.user.id,
+      rejectionReason: '',
+      aadharCard: {
+        ...(roleKyc.aadharCard || fallbackKyc.aadharCard || {}),
+        status: 'verified',
+      },
+      panCard: {
+        ...(roleKyc.panCard || fallbackKyc.panCard || {}),
+        status: 'verified',
+      },
+      companyDoc: {
+        ...(roleKyc.companyDoc || fallbackKyc.companyDoc || {}),
+        status: (roleKyc.companyDoc?.url || fallbackKyc.companyDoc?.url) ? 'verified' : 'unverified',
+      },
+      agencyDoc: {
+        ...(roleKyc.agencyDoc || fallbackKyc.agencyDoc || {}),
+        status: (roleKyc.agencyDoc?.url || fallbackKyc.agencyDoc?.url) ? 'verified' : 'unverified',
+      },
+    };
+
+    targetUser.roleKycVerification[roleToApprove] = approvedObj;
+
+    if (targetUser.role === roleToApprove || targetUser.kycVerification?.roleAtSubmission === roleToApprove) {
+      targetUser.kycVerification = {
+        ...approvedObj,
+        roleAtSubmission: roleToApprove,
+      };
     }
 
     await targetUser.save();
 
     res.status(200).json({
       success: true,
-      message: `KYC documents for ${targetUser.name} (${targetUser.email}) approved successfully. User can now post properties.`,
-      data: targetUser.kycVerification,
+      message: `${roleToApprove.charAt(0).toUpperCase() + roleToApprove.slice(1)} documents for ${targetUser.name} (${targetUser.email}) approved successfully.`,
+      data: targetUser.roleKycVerification[roleToApprove],
+      roleKycVerification: targetUser.roleKycVerification,
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Reject user's submitted KYC documents with reason
+// @desc    Reject user's submitted KYC documents with reason (optionally for a specific role)
 // @route   PATCH /api/admin/kyc-requests/:userId/reject
 // @access  Private / Admin
 exports.rejectKycRequest = async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const { rejectionReason } = req.body;
+    const { rejectionReason, role } = req.body;
+    const targetRole = role || req.query?.role;
 
     const targetUser = await User.findById(userId);
     if (!targetUser) {
       return next(new AppError('User not found', 404));
     }
 
-    if (!targetUser.kycVerification) {
-      return next(new AppError('User has no KYC document record', 400));
-    }
-
+    const roleToReject = targetRole || targetUser.kycVerification?.roleAtSubmission || targetUser.role;
     const reason = rejectionReason?.trim() || 'Uploaded documents did not meet verification criteria. Please re-upload clear copies.';
 
-    targetUser.kycVerification.status = 'rejected';
-    targetUser.kycVerification.reviewedAt = new Date();
-    targetUser.kycVerification.reviewedBy = req.user.id;
-    targetUser.kycVerification.rejectionReason = reason;
+    if (!targetUser.roleKycVerification) {
+      targetUser.roleKycVerification = {
+        builder: { status: 'unverified' },
+        agent: { status: 'unverified' },
+        owner: { status: 'unverified' },
+      };
+    }
 
-    if (targetUser.kycVerification.aadharCard?.url) {
-      targetUser.kycVerification.aadharCard.status = 'rejected';
-    }
-    if (targetUser.kycVerification.panCard?.url) {
-      targetUser.kycVerification.panCard.status = 'rejected';
-    }
-    if (targetUser.kycVerification.companyDoc?.url) {
-      targetUser.kycVerification.companyDoc.status = 'rejected';
-    }
-    if (targetUser.kycVerification.agencyDoc?.url) {
-      targetUser.kycVerification.agencyDoc.status = 'rejected';
+    const roleKyc = targetUser.roleKycVerification[roleToReject] || {};
+    const fallbackKyc = targetUser.kycVerification || {};
+
+    const rejectedObj = {
+      status: 'rejected',
+      submittedAt: roleKyc.submittedAt || fallbackKyc.submittedAt || new Date(),
+      reviewedAt: new Date(),
+      reviewedBy: req.user.id,
+      rejectionReason: reason,
+      aadharCard: {
+        ...(roleKyc.aadharCard || fallbackKyc.aadharCard || {}),
+        status: 'rejected',
+      },
+      panCard: {
+        ...(roleKyc.panCard || fallbackKyc.panCard || {}),
+        status: 'rejected',
+      },
+      companyDoc: {
+        ...(roleKyc.companyDoc || fallbackKyc.companyDoc || {}),
+        status: (roleKyc.companyDoc?.url || fallbackKyc.companyDoc?.url) ? 'rejected' : 'unverified',
+      },
+      agencyDoc: {
+        ...(roleKyc.agencyDoc || fallbackKyc.agencyDoc || {}),
+        status: (roleKyc.agencyDoc?.url || fallbackKyc.agencyDoc?.url) ? 'rejected' : 'unverified',
+      },
+    };
+
+    targetUser.roleKycVerification[roleToReject] = rejectedObj;
+
+    if (targetUser.role === roleToReject || targetUser.kycVerification?.roleAtSubmission === roleToReject) {
+      targetUser.kycVerification = {
+        ...rejectedObj,
+        roleAtSubmission: roleToReject,
+      };
     }
 
     await targetUser.save();
 
     res.status(200).json({
       success: true,
-      message: `KYC documents for ${targetUser.name} (${targetUser.email}) have been rejected.`,
-      data: targetUser.kycVerification,
+      message: `${roleToReject.charAt(0).toUpperCase() + roleToReject.slice(1)} documents for ${targetUser.name} (${targetUser.email}) have been rejected.`,
+      data: targetUser.roleKycVerification[roleToReject],
+      roleKycVerification: targetUser.roleKycVerification,
     });
   } catch (error) {
     next(error);

@@ -4,7 +4,7 @@ import { getProjectUnits, bookUnit } from '../../services/bookingService';
 import { broadcastRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
 import { formatPrice } from '../../utils/formatters';
 
-const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
+const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast, onViewInvoice }) => {
   const [units, setUnits] = useState([]);
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [unitPage, setUnitPage] = useState(1);
@@ -97,8 +97,12 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
         broadcastRealtimeSync(SYNC_EVENTS.BOOKINGS, { action: 'created', unitId: selectedUnitId });
         broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, { action: 'unit_booked', leadId: lead._id });
         broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'unit_booked' });
-        if (showToast) showToast('Unit locked and booked successfully! Commission liability created.', 'success');
+        const createdBooking = res.data?.booking || res.data;
+        if (showToast) showToast('Unit locked and booked successfully! Token payment recorded.', 'success');
         onSuccess(res.data);
+        if (onViewInvoice && createdBooking?._id) {
+          onViewInvoice(createdBooking._id);
+        }
         onClose();
       }
     } catch (err) {
@@ -112,10 +116,11 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl p-6 max-w-xl w-full shadow-2xl border border-slate-200 text-left max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold">
+      <div className="bg-white rounded-2xl max-w-xl w-full shadow-2xl border border-slate-200 text-left max-h-[92vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-slate-100 shrink-0 bg-white">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
               <KeyRound size={18} />
             </div>
             <div>
@@ -125,18 +130,20 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+            className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
-        {error && (
-          <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
-            <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            <span>{error}</span>
-          </div>
-        )}
+        {/* Scrollable Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1 modal-scroll space-y-4">
+          {error && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs flex items-start gap-2">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
 
         {/* Lead Summary */}
         <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 mb-4 text-xs space-y-1">
@@ -164,7 +171,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form id="book-unit-form" onSubmit={handleSubmit} className="space-y-4">
           {/* Unit Inventory Selector */}
           <div>
             <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -295,25 +302,28 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast }) => {
               className="w-full p-2.5 rounded-lg border border-slate-300 text-xs text-slate-800"
             />
           </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || units.length === 0}
-              className="px-5 py-2.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
-            >
-              <CheckCircle2 size={14} />
-              <span>{submitting ? 'Locking & Booking...' : 'Confirm Concurrency-Safe Booking'}</span>
-            </button>
-          </div>
         </form>
+      </div>
+
+        {/* Footer Actions */}
+        <div className="flex items-center justify-end gap-2.5 px-5 sm:px-6 py-3.5 border-t border-slate-100 bg-white shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="book-unit-form"
+            disabled={submitting || units.length === 0}
+            className="px-5 py-2.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+          >
+            <CheckCircle2 size={14} />
+            <span>{submitting ? 'Locking & Booking...' : 'Confirm Concurrency-Safe Booking'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -94,6 +94,15 @@ const inquirySchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    siteVisitCompleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    siteVisitCompletedAt: {
+      type: Date,
+      default: null,
+    },
     // Channel Partner & Attribution Engine fields
     agent: {
       type: mongoose.Schema.Types.ObjectId,
