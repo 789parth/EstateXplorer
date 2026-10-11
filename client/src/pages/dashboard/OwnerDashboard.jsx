@@ -52,6 +52,7 @@ import './BuilderDashboard.css';
 // Lazy-loaded heavy modal
 const AddPropertyModal = lazy(() => import('../../components/dashboard/AddPropertyModal'));
 const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
+const BookingInvoiceModal = lazy(() => import('../../components/dashboard/BookingInvoiceModal'));
 
 const OwnerDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
@@ -120,6 +121,12 @@ const OwnerDashboard = () => {
   const [expandedInquiryId, setExpandedInquiryId] = useState(null);
   const [selectedInquiryIds, setSelectedInquiryIds] = useState([]);
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [invoiceBookingId, setInvoiceBookingId] = useState(null);
+
+  // Token Amount Modal State (Enable Booking feature)
+  const [tokenModalVisit, setTokenModalVisit] = useState(null);
+  const [tokenAmountInput, setTokenAmountInput] = useState('');
+  const [savingTokenAmount, setSavingTokenAmount] = useState(false);
 
   // Reschedule Modal state
   const [rescheduleItem, setRescheduleItem] = useState(null);
@@ -393,6 +400,56 @@ const OwnerDashboard = () => {
     setRescheduleItem(visit);
     setNewVisitDate(visit.visitDate || '');
     setNewVisitTime(visit.visitTime || '');
+  };
+
+  const handleOpenEnableBooking = (visit) => {
+    setTokenModalVisit(visit);
+    setTokenAmountInput(visit.tokenAmount ? String(visit.tokenAmount) : '');
+  };
+
+  const handleSaveTokenAmount = async (e) => {
+    if (e) e.preventDefault();
+    if (!tokenModalVisit) return;
+    const amount = Number(tokenAmountInput);
+    if (!amount || isNaN(amount) || amount <= 0) {
+      showToast('Please enter a valid positive token amount', 'error');
+      return;
+    }
+
+    try {
+      setSavingTokenAmount(true);
+      const res = await updateInquiryStatus(tokenModalVisit._id, tokenModalVisit.status || 'closed', {
+        tokenAmount: amount,
+        bookingEnabled: true,
+      });
+      if (res.success) {
+        showToast(`Token amount of ₹ ${amount.toLocaleString('en-IN')} set and booking enabled!`, 'success');
+        setInquiries((prev) =>
+          prev.map((inq) =>
+            inq._id === tokenModalVisit._id
+              ? {
+                  ...inq,
+                  tokenAmount: amount,
+                  bookingEnabled: true,
+                  ...(res.data || {}),
+                }
+              : inq
+          )
+        );
+        broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, {
+          action: 'token_amount_set',
+          inquiryId: tokenModalVisit._id,
+          tokenAmount: amount,
+          bookingEnabled: true,
+        });
+        setTokenModalVisit(null);
+        setTokenAmountInput('');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to set token amount', 'error');
+    } finally {
+      setSavingTokenAmount(false);
+    }
   };
 
   const handleRescheduleSubmit = async (e) => {
@@ -1369,116 +1426,132 @@ const OwnerDashboard = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {siteVisitsList.map((visit) => {
-                      const isClosed = visit.status === 'closed';
-                      const propTitle = visit.property?.title || visit.propertyTitle || 'Property Listing';
-                      return (
-                        <div
-                          key={visit._id}
-                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${
-                            isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
-                          }`}
-                        >
-                          <div>
-                            <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${
-                                  isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                }`}
-                              >
-                                <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                {isClosed && (
-                                  <span className="px-1.5 py-0.2 rounded text-[0.62rem] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    Done
-                                  </span>
+                  <div className="space-y-3">
+                    <div className="max-h-[640px] overflow-y-auto modal-scroll pr-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {siteVisitsList.map((visit) => {
+                          const isClosed = visit.status === 'closed';
+                          const propTitle = visit.property?.title || visit.propertyTitle || 'Property Listing';
+                          return (
+                            <div
+                              key={visit._id}
+                              className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${
+                                isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${
+                                        isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                      }`}
+                                    >
+                                      <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {isClosed && (
+                                      <span className="px-1.5 py-0.2 rounded text-[0.62rem] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        Done
+                                      </span>
+                                    )}
+                                    <span className="text-[0.68rem] text-slate-400">
+                                      {new Date(visit.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <h4 className="font-bold text-sm text-slate-900 mb-1">{visit.name}</h4>
+                                <div className="text-xs text-slate-600 font-medium mb-1.5 flex items-center gap-1">
+                                  <span className="text-slate-400">Property:</span>
+                                  {visit.property?._id ? (
+                                    <Link
+                                      to={`/property/${visit.property._id}`}
+                                      className="text-blue-600 hover:underline font-semibold inline-flex items-center gap-1 truncate"
+                                    >
+                                      {propTitle}
+                                      <ExternalLink size={10} />
+                                    </Link>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 truncate">{propTitle}</span>
+                                  )}
+                                </div>
+
+                                <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
+                                  {visit.phone && (
+                                    <div>
+                                      <a href={`tel:${visit.phone.replace(/\s+/g, '')}`} className="hover:text-emerald-700 hover:underline inline-flex items-center gap-1.5 text-slate-600">
+                                        <Phone size={12} className="text-slate-400 shrink-0" /> {formatPhoneNumber(visit.phone)}
+                                      </a>
+                                    </div>
+                                  )}
+                                  {visit.email && (
+                                    <div>
+                                      <a href={`mailto:${visit.email}`} className="hover:text-blue-700 hover:underline inline-flex items-center gap-1.5 text-slate-600 truncate max-w-full">
+                                        <Mail size={12} className="text-slate-400 shrink-0" /> {visit.email}
+                                      </a>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                                {isClosed ? (
+                                  <>
+                                    <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
+                                      <Check size={12} className="text-emerald-600" /> Completed
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEnableBooking(visit)}
+                                      className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                      title="Set or update token amount to enable booking for buyer"
+                                    >
+                                      {visit.tokenAmount > 0 ? `Token: ₹ ${Number(visit.tokenAmount).toLocaleString('en-IN')}` : 'Enable Booking'}
+                                    </button>
+                                    {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || (visit.bookingRef && visit.tokenPaymentStatus !== 'unpaid')) ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setInvoiceBookingId(visit.bookingRef ? (typeof visit.bookingRef === 'object' ? visit.bookingRef._id : visit.bookingRef) : visit._id)}
+                                        className="py-1.5 px-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors cursor-pointer"
+                                      >
+                                        Invoice
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      title="Delete Site Visit"
+                                      onClick={(e) => handleDeleteSingleInquiry(visit._id, e)}
+                                      className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer shrink-0"
+                                    >
+                                      <Trash2 size={14} className="text-red-600" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => handleStatusChange(visit._id, 'closed')}
+                                      disabled={actionLoadingId === visit._id}
+                                      className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                    >
+                                      <Check size={12} /> {actionLoadingId === visit._id ? 'Updating...' : 'Confirm & Done'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleOpenReschedule(visit)}
+                                      disabled={actionLoadingId === visit._id}
+                                      className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                                    >
+                                      Reschedule
+                                    </button>
+                                  </>
                                 )}
-                                <span className="text-[0.68rem] text-slate-400">
-                                  {new Date(visit.createdAt).toLocaleDateString()}
-                                </span>
                               </div>
                             </div>
-
-                            <h4 className="font-bold text-sm text-slate-900 mb-1">{visit.name}</h4>
-                            <div className="text-xs text-slate-600 font-medium mb-1.5 flex items-center gap-1">
-                              <span className="text-slate-400">Property:</span>
-                              {visit.property?._id ? (
-                                <Link
-                                  to={`/property/${visit.property._id}`}
-                                  className="text-blue-600 hover:underline font-semibold inline-flex items-center gap-1 truncate"
-                                >
-                                  {propTitle}
-                                  <ExternalLink size={10} />
-                                </Link>
-                              ) : (
-                                <span className="font-semibold text-slate-800 truncate">{propTitle}</span>
-                              )}
-                            </div>
-
-                            <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
-                              {visit.phone && (
-                                <div>
-                                  <a href={`tel:${visit.phone.replace(/\s+/g, '')}`} className="hover:text-emerald-700 hover:underline inline-flex items-center gap-1.5 text-slate-600">
-                                    <Phone size={12} className="text-slate-400 shrink-0" /> {formatPhoneNumber(visit.phone)}
-                                  </a>
-                                </div>
-                              )}
-                              {visit.email && (
-                                <div>
-                                  <a href={`mailto:${visit.email}`} className="hover:text-blue-700 hover:underline inline-flex items-center gap-1.5 text-slate-600 truncate max-w-full">
-                                    <Mail size={12} className="text-slate-400 shrink-0" /> {visit.email}
-                                  </a>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                            {isClosed ? (
-                              <>
-                                <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
-                                  <Check size={12} className="text-emerald-600" /> Completed
-                                </div>
-                                <button
-                                  onClick={() => handleOpenReschedule(visit)}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                                >
-                                  Reschedule
-                                </button>
-                                <button
-                                  onClick={() => handleStatusChange(visit._id, 'visit')}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-500 text-xs font-medium transition-colors cursor-pointer"
-                                  title="Revert to upcoming"
-                                >
-                                  Revert
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleStatusChange(visit._id, 'closed')}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                                >
-                                  <Check size={12} /> {actionLoadingId === visit._id ? 'Updating...' : 'Confirm & Done'}
-                                </button>
-                                <button
-                                  onClick={() => handleOpenReschedule(visit)}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                                >
-                                  Reschedule
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2027,6 +2100,95 @@ const OwnerDashboard = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Set Token Amount Modal (Enable Booking) ── */}
+      {tokenModalVisit && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+              <h4 className="font-bold text-slate-900 text-base flex items-center gap-2 text-emerald-700">
+                <Check size={18} className="text-emerald-600" /> Set Token Amount
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setTokenModalVisit(null);
+                  setTokenAmountInput('');
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs">
+              <div className="text-slate-500">
+                Buyer: <strong className="text-slate-800">{tokenModalVisit.name || 'Buyer'}</strong>
+              </div>
+              <div className="text-slate-500">
+                Property: <strong className="text-slate-800">{tokenModalVisit.propertyTitle || tokenModalVisit.propertyName || tokenModalVisit.projectName || 'Property'}</strong>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveTokenAmount}>
+              <div className="mb-5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Token Amount (₹) <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={tokenAmountInput}
+                    onChange={(e) => setTokenAmountInput(e.target.value)}
+                    placeholder="e.g. 50000"
+                    className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-600"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[0.7rem] text-slate-500 mt-1.5">
+                  Setting this amount enables the buyer to view and pay the token amount directly from their account.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTokenModalVisit(null);
+                    setTokenAmountInput('');
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTokenAmount}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <Check size={14} />
+                  <span>{savingTokenAmount ? 'Saving...' : 'Set Token Amount'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Official Token Payment Invoice Modal */}
+      {Boolean(invoiceBookingId) && (
+        <Suspense fallback={null}>
+          <BookingInvoiceModal
+            isOpen={Boolean(invoiceBookingId)}
+            bookingId={invoiceBookingId}
+            onClose={() => setInvoiceBookingId(null)}
+          />
+        </Suspense>
       )}
 
     </div>

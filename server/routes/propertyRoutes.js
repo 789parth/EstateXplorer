@@ -15,6 +15,7 @@ const {
   deleteInquiry,
   bulkDeleteInquiries,
   replyToPropertyInquiry,
+  payTokenAmount,
   getUserWishlist,
   toggleWishlist,
 } = require('../controllers/propertyController');
@@ -41,6 +42,7 @@ router.post('/wishlist/:id', protect, toggleWishlist);
 router.get('/inquiries/mine', protect, getMyInquiries);
 router.get('/inquiries/buyer', protect, getBuyerInquiries);
 router.post('/inquiries/bulk-delete', protect, bulkDeleteInquiries);
+router.post('/inquiries/:id/pay-token', protect, payTokenAmount);
 router.patch('/inquiries/:id', protect, updateInquiryStatus);
 router.delete('/inquiries/:id', protect, deleteInquiry);
 router.post('/inquiries/:id/reply', protect, replyToPropertyInquiry);

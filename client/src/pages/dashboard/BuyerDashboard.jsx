@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { getProperties, getUserWishlist, toggleWishlistApi, getBuyerInquiries } from '../../services/propertyService';
-import { X, Heart, MessageSquare, Calendar } from 'lucide-react';
+import { getProperties, getUserWishlist, toggleWishlistApi, getBuyerInquiries, payTokenAmountApi } from '../../services/propertyService';
+import { X, Heart, MessageSquare, Calendar, CreditCard, CheckCircle, ShieldCheck } from 'lucide-react';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
 import { formatPrice, getPublicImageUrl } from '../../utils/formatters';
 import './BuyerDashboard.css';
@@ -21,6 +21,18 @@ const BuyerDashboard = () => {
   const [recommendedProps, setRecommendedProps] = useState([]);
   const [likedIds, setLikedIds] = useState([]);
 
+  // Payment Gateway Modal State (Token Payment)
+  const [paymentModalItem, setPaymentModalItem] = useState(null);
+  const [paymentMethod, setPaymentMethod] = useState('UPI');
+  const [upiId, setUpiId] = useState('');
+  const [cardNumber, setCardNumber] = useState('');
+  const [cardExpiry, setCardExpiry] = useState('');
+  const [cardCvv, setCardCvv] = useState('');
+  const [bankName, setBankName] = useState('State Bank of India');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [paymentSuccessData, setPaymentSuccessData] = useState(null);
+  const [paymentError, setPaymentError] = useState('');
+
   // Load recently viewed from localStorage
   const loadRecentlyViewed = useCallback(() => {
     try {
@@ -38,6 +50,71 @@ const BuyerDashboard = () => {
     setRecentlyViewed([]);
     setRecommendedProps([]);
     broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'clear_recently_viewed' });
+  };
+
+  const handleOpenPaymentModal = (item) => {
+    setPaymentModalItem(item);
+    setPaymentMethod('UPI');
+    setUpiId(user?.email ? `${user.email.split('@')[0]}@okaxis` : 'buyer@okhdfcbank');
+    setCardNumber('4532 •••• •••• 8821');
+    setCardExpiry('08/29');
+    setCardCvv('•••');
+    setPaymentError('');
+    setPaymentSuccessData(null);
+    setIsProcessingPayment(false);
+  };
+
+  const handleProcessPayment = async (e) => {
+    if (e) e.preventDefault();
+    if (!paymentModalItem) return;
+
+    try {
+      setIsProcessingPayment(true);
+      setPaymentError('');
+
+      // Simulated secure gateway authorization delay (1s)
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const generatedRef = `TXN-TOK-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const res = await payTokenAmountApi(paymentModalItem.inquiryId, {
+        paymentMethod,
+        paymentRef: generatedRef,
+      });
+
+      if (res.success) {
+        setPaymentSuccessData({
+          ...res.data,
+          propertyName: paymentModalItem.name,
+          tokenAmount: paymentModalItem.tokenAmount,
+          ref: res.data?.tokenPaymentRef || generatedRef,
+        });
+
+        // Update local state for visits and inquiries
+        setUpcomingVisits((prev) =>
+          prev.map((v) =>
+            v.inquiryId === paymentModalItem.inquiryId
+              ? { ...v, tokenPaymentStatus: 'paid', tokenPaymentRef: generatedRef, lifecycleStage: 'token_paid' }
+              : v
+          )
+        );
+        setInquiries((prev) =>
+          prev.map((i) =>
+            i.inquiryId === paymentModalItem.inquiryId
+              ? { ...i, tokenPaymentStatus: 'paid', tokenPaymentRef: generatedRef, lifecycleStage: 'token_paid' }
+              : i
+          )
+        );
+
+        broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, {
+          action: 'token_paid',
+          inquiryId: paymentModalItem.inquiryId,
+        });
+      }
+    } catch (err) {
+      setPaymentError(err.response?.data?.message || 'Payment processing failed. Please try again.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
   
   const fetchBuyerData = useCallback(async () => {
@@ -79,6 +156,12 @@ const BuyerDashboard = () => {
             visitRequested: Boolean(inq.visitRequested || inq.status === 'visit'),
             visitDate: inq.visitDate,
             visitTime: inq.visitTime,
+            tokenAmount: inq.tokenAmount || 0,
+            bookingEnabled: Boolean(inq.bookingEnabled || (inq.tokenAmount && inq.tokenAmount > 0)),
+            tokenPaymentStatus: inq.tokenPaymentStatus || (inq.lifecycleStage === 'token_paid' ? 'paid' : 'unpaid'),
+            tokenPaymentRef: inq.tokenPaymentRef || '',
+            tokenDate: inq.tokenDate || null,
+            lifecycleStage: inq.lifecycleStage || 'new',
             status: inq.status === 'expired'
               ? 'Expired'
               : inq.status === 'visit'
@@ -492,6 +575,27 @@ const BuyerDashboard = () => {
                             Representative: &quot;{inq.notes}&quot;
                           </div>
                         )}
+                        {inq.tokenAmount > 0 && (
+                          <div style={{ marginTop: '6px', padding: '5px 8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', fontSize: '0.74rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <div>
+                              <span style={{ color: '#166534', fontWeight: 600 }}>Booking Token:</span>{' '}
+                              <strong style={{ color: '#15803d' }}>₹ {Number(inq.tokenAmount).toLocaleString('en-IN')}</strong>
+                            </div>
+                            {inq.tokenPaymentStatus === 'paid' ? (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.7rem' }}>
+                                <CheckCircle size={12} /> Paid
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenPaymentModal(inq)}
+                                style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <CreditCard size={11} /> Pay Token
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="enquiry-right">
                         <div className="enquiry-time">{formatDate(inq.date)}</div>
@@ -537,6 +641,29 @@ const BuyerDashboard = () => {
                           {visit.notes && (
                             <div style={{ fontSize: '0.72rem', color: '#047857', marginTop: '3px', background: '#ecfdf5', padding: '2px 6px', borderRadius: '4px', display: 'inline-block' }}>
                               Representative: &quot;{visit.notes}&quot;
+                            </div>
+                          )}
+
+                          {/* Specified Token Amount for this Property */}
+                          {visit.tokenAmount > 0 && (
+                            <div style={{ marginTop: '6px', padding: '6px 8px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                              <div>
+                                <span style={{ color: '#166534', fontWeight: 600 }}>Booking Token Amount:</span>{' '}
+                                <strong style={{ color: '#15803d', fontSize: '0.82rem' }}>₹ {Number(visit.tokenAmount).toLocaleString('en-IN')}</strong>
+                              </div>
+                              {visit.tokenPaymentStatus === 'paid' ? (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.7rem' }}>
+                                  <CheckCircle size={12} /> Paid
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPaymentModal(visit)}
+                                  style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  <CreditCard size={12} /> Pay Token
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -622,6 +749,210 @@ const BuyerDashboard = () => {
 
         </div>
       </div>
+
+      {/* Payment Gateway Modal (Token Payment) */}
+      {paymentModalItem && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '16px', maxWidth: '440px', width: '100%', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', border: '1px solid #e2e8f0', color: '#1e293b' }}>
+            
+            {/* Modal Header */}
+            <div style={{ background: '#0f172a', color: '#ffffff', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldCheck size={20} color="#10b981" />
+                <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>Integrated Payment Gateway</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPaymentModalItem(null)}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', display: 'flex', padding: 0 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {paymentSuccessData ? (
+              /* Success View */
+              <div style={{ padding: '24px 20px', textAlign: 'center' }}>
+                <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                  <CheckCircle size={32} />
+                </div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', marginBottom: '6px' }}>Token Payment Successful!</h3>
+                <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '16px' }}>
+                  Your token booking amount of <strong>₹ {Number(paymentSuccessData.tokenAmount).toLocaleString('en-IN')}</strong> for <strong>{paymentSuccessData.propertyName}</strong> has been received.
+                </p>
+
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', fontSize: '0.75rem', textAlign: 'left', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#64748b' }}>Transaction ID:</span>
+                    <strong style={{ fontFamily: 'monospace', color: '#0f172a' }}>{paymentSuccessData.ref}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#64748b' }}>Payment Mode:</span>
+                    <strong style={{ color: '#0f172a' }}>{paymentMethod}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#64748b' }}>Status:</span>
+                    <strong style={{ color: '#16a34a' }}>Completed &amp; Locked</strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setPaymentModalItem(null)}
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', background: '#0f172a', color: '#ffffff', border: 'none', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer' }}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              /* Gateway Payment Form */
+              <form onSubmit={handleProcessPayment} style={{ padding: '20px' }}>
+                {/* Property summary */}
+                <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '12px', marginBottom: '16px' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em' }}>Property &amp; Booking Token</div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0f172a', marginTop: '2px' }}>{paymentModalItem.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#475569' }}>Payable Amount:</span>
+                    <strong style={{ fontSize: '1.05rem', color: '#15803d' }}>₹ {Number(paymentModalItem.tokenAmount).toLocaleString('en-IN')}</strong>
+                  </div>
+                </div>
+
+                {paymentError && (
+                  <div style={{ padding: '8px 12px', background: '#fee2e2', border: '1px solid #fca5a5', color: '#b91c1c', borderRadius: '8px', fontSize: '0.75rem', marginBottom: '12px' }}>
+                    {paymentError}
+                  </div>
+                )}
+
+                {/* Method selector tabs */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '8px' }}>Select Payment Method</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                    {['UPI', 'Card', 'NetBanking'].map((method) => (
+                      <button
+                        key={method}
+                        type="button"
+                        onClick={() => setPaymentMethod(method)}
+                        style={{
+                          padding: '7px 4px',
+                          borderRadius: '8px',
+                          border: paymentMethod === method ? '2px solid #0f172a' : '1px solid #cbd5e1',
+                          background: paymentMethod === method ? '#0f172a' : '#ffffff',
+                          color: paymentMethod === method ? '#ffffff' : '#334155',
+                          fontWeight: 700,
+                          fontSize: '0.72rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {method}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Method specific inputs */}
+                {paymentMethod === 'UPI' && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>UPI ID (Google Pay / PhonePe / Paytm)</label>
+                    <input
+                      type="text"
+                      required
+                      value={upiId}
+                      onChange={(e) => setUpiId(e.target.value)}
+                      placeholder="username@okhdfcbank"
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', color: '#0f172a', outline: 'none' }}
+                    />
+                  </div>
+                )}
+
+                {paymentMethod === 'Card' && (
+                  <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>Card Number</label>
+                      <input
+                        type="text"
+                        required
+                        value={cardNumber}
+                        onChange={(e) => setCardNumber(e.target.value)}
+                        placeholder="•••• •••• •••• ••••"
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', color: '#0f172a', outline: 'none' }}
+                      />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>Expiry</label>
+                        <input
+                          type="text"
+                          required
+                          value={cardExpiry}
+                          onChange={(e) => setCardExpiry(e.target.value)}
+                          placeholder="MM/YY"
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', color: '#0f172a', outline: 'none' }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>CVV</label>
+                        <input
+                          type="password"
+                          required
+                          maxLength="4"
+                          value={cardCvv}
+                          onChange={(e) => setCardCvv(e.target.value)}
+                          placeholder="•••"
+                          style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', color: '#0f172a', outline: 'none' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {paymentMethod === 'NetBanking' && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ display: 'block', fontSize: '0.74rem', fontWeight: 700, color: '#334155', marginBottom: '4px' }}>Select Bank</label>
+                    <select
+                      value={bankName}
+                      onChange={(e) => setBankName(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '0.8rem', color: '#0f172a', outline: 'none', background: '#fff' }}
+                    >
+                      <option value="State Bank of India">State Bank of India (SBI)</option>
+                      <option value="HDFC Bank">HDFC Bank</option>
+                      <option value="ICICI Bank">ICICI Bank</option>
+                      <option value="Axis Bank">Axis Bank</option>
+                      <option value="Kotak Mahindra Bank">Kotak Mahindra Bank</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Gateway safety footnote */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem', color: '#64748b', marginBottom: '16px' }}>
+                  <ShieldCheck size={14} color="#16a34a" /> 256-bit SSL encrypted secure real estate escrow simulation
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModalItem(null)}
+                    style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#475569', fontWeight: 600, fontSize: '0.78rem', cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingPayment}
+                    style={{ flex: 2, padding: '10px', borderRadius: '8px', border: 'none', background: '#16a34a', color: '#ffffff', fontWeight: 800, fontSize: '0.82rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', opacity: isProcessingPayment ? 0.6 : 1 }}
+                  >
+                    <CreditCard size={14} />
+                    {isProcessingPayment ? 'Processing Payment...' : `Pay ₹ ${Number(paymentModalItem.tokenAmount).toLocaleString('en-IN')}`}
+                  </button>
+                </div>
+              </form>
+            )}
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

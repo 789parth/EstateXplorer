@@ -230,13 +230,109 @@ exports.getBookingInvoice = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid booking ID.' });
     }
 
-    const booking = await Booking.findById(id)
+    let booking = await Booking.findById(id)
       .populate('project', 'title type category location price priceDisplay images builder')
       .populate('unit', 'unitNumber tower floor bhk carpetArea price')
       .populate('builder', 'name email phone companyName reraNumber address avatar')
       .populate('agent', 'name email phone agencyName agentCode avatar')
       .populate('buyer', 'name email phone avatar')
       .lean();
+
+    if (!booking) {
+      // Fallback: check if id is an Inquiry with bookingRef or paid token
+      const Inquiry = require('../models/Inquiry');
+      const inq = await Inquiry.findById(id)
+        .populate('property', 'title type category location price priceDisplay images builder')
+        .populate('project', 'title type category location price priceDisplay images builder')
+        .populate('builder', 'name email phone companyName reraNumber address avatar')
+        .populate('agent', 'name email phone agencyName agentCode avatar')
+        .populate('user', 'name email phone avatar')
+        .lean();
+
+      if (inq && inq.bookingRef) {
+        booking = await Booking.findById(inq.bookingRef)
+          .populate('project', 'title type category location price priceDisplay images builder')
+          .populate('unit', 'unitNumber tower floor bhk carpetArea price')
+          .populate('builder', 'name email phone companyName reraNumber address avatar')
+          .populate('agent', 'name email phone agencyName agentCode avatar')
+          .populate('buyer', 'name email phone avatar')
+          .lean();
+      }
+
+      if (!booking && inq && (inq.tokenPaymentStatus === 'paid' || inq.lifecycleStage === 'token_paid')) {
+        // Construct synthesized invoice from inquiry token payment
+        const targetProp = inq.property || inq.project;
+        const currentUserId = String(req.user._id || req.user.id);
+        const inqBuilderId = inq.builder ? String(inq.builder._id || inq.builder) : (targetProp?.builder ? String(targetProp.builder._id || targetProp.builder) : null);
+        const inqAgentId = inq.agent ? String(inq.agent._id || inq.agent) : null;
+        const inqBuyerId = inq.user ? String(inq.user._id || inq.user) : null;
+        const isAuth = (inqBuilderId === currentUserId) || (inqAgentId === currentUserId) || (inqBuyerId === currentUserId) || req.user.role === 'admin' || (req.user.email && inq.email && req.user.email.toLowerCase() === inq.email.toLowerCase());
+
+        if (!isAuth) {
+          return res.status(403).json({ success: false, message: 'You are not authorized to view this booking invoice.' });
+        }
+
+        const invoiceNumber = `INV-${inq.tokenPaymentRef || inq._id.toString().toUpperCase().slice(-8)}`;
+        const tokenAmountPaid = Number(inq.tokenAmount || 0);
+        const agreementValue = Number(targetProp?.price || tokenAmountPaid);
+        const balanceDue = Math.max(0, agreementValue - tokenAmountPaid);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            invoiceNumber,
+            bookingNumber: inq.tokenPaymentRef || inq._id.toString().toUpperCase().slice(-8),
+            bookingId: inq._id,
+            date: inq.tokenDate || inq.updatedAt || inq.createdAt,
+            status: 'confirmed',
+            paymentStatus: 'Token Paid',
+            issuer: {
+              name: inq.builder?.companyName || inq.builder?.name || inq.builderName || 'Property Developer',
+              email: inq.builder?.email || '',
+              phone: inq.builder?.phone || '',
+              reraNumber: inq.builder?.reraNumber || '',
+              address: inq.builder?.address || '',
+            },
+            buyer: {
+              name: inq.name || inq.user?.name || 'Buyer',
+              email: inq.email || inq.user?.email || '',
+              phone: inq.phone || inq.user?.phone || '',
+            },
+            agent: inq.isAttributed && inq.agent ? {
+              name: inq.agent.name || '',
+              agencyName: inq.agent.agencyName || '',
+              agentCode: inq.agentCode || inq.agent.agentCode || '',
+              phone: inq.agent.phone || '',
+            } : null,
+            project: {
+              title: inq.projectName || targetProp?.title || inq.propertyTitle || 'Property',
+              location: inq.propertyLocation || targetProp?.location || '',
+              type: inq.propertyType || targetProp?.type || 'Residential',
+            },
+            unit: {
+              unitNumber: inq.bookedUnit?.unitNumber || 'Site Tour / Confirmed Unit',
+              tower: inq.bookedUnit?.tower || 'N/A',
+              floor: inq.bookedUnit?.floor ?? 'N/A',
+              bhk: inq.bookedUnit?.bhk ?? 'N/A',
+              carpetArea: inq.bookedUnit?.carpetArea ? `${inq.bookedUnit.carpetArea} sq.ft` : 'N/A',
+            },
+            pricing: {
+              agreementValue,
+              tokenAmountPaid,
+              balanceDue,
+              currency: 'INR',
+              currencySymbol: '₹',
+            },
+            payment: {
+              method: inq.tokenPaymentMethod || 'UPI / Online Gateway',
+              transactionRef: inq.tokenPaymentRef || 'TOKEN-ONLINE',
+              paidAt: inq.tokenDate || inq.updatedAt || inq.createdAt,
+            },
+            notes: inq.notes || '',
+          },
+        });
+      }
+    }
 
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found.' });

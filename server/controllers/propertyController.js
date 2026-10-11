@@ -938,8 +938,19 @@ exports.getMyInquiries = async (req, res, next) => {
     const orConditions = [];
 
     if (targetRole === 'agent' && (userRoles.includes('agent') || activeRole === 'agent')) {
-      // Agent sees inquiries attributed to their account
+      // Agent sees inquiries attributed to their account, PLUS inquiries on properties they manage/list
       orConditions.push({ agent: currentUserId });
+      const managedProps = await Property.find({
+        $or: [{ builder: currentUserId }, { agent: currentUserId }],
+      })
+        .select('_id')
+        .lean();
+      const managedPropIds = managedProps.map((p) => p._id);
+      orConditions.push({ builder: currentUserId });
+      if (managedPropIds.length > 0) {
+        orConditions.push({ property: { $in: managedPropIds } });
+        orConditions.push({ project: { $in: managedPropIds } });
+      }
     } else if (
       (targetRole === 'builder' || targetRole === 'owner') &&
       (userRoles.includes('builder') || userRoles.includes('owner') || activeRole === 'builder' || activeRole === 'owner')
@@ -1118,6 +1129,18 @@ exports.updateInquiryStatus = async (req, res, next) => {
     }
     if (req.body.visitTime !== undefined) {
       inquiry.visitTime = req.body.visitTime;
+    }
+    if (req.body.tokenAmount !== undefined) {
+      inquiry.tokenAmount = Number(req.body.tokenAmount) || 0;
+      if (inquiry.tokenAmount > 0) {
+        inquiry.bookingEnabled = true;
+      }
+    }
+    if (req.body.bookingEnabled !== undefined) {
+      inquiry.bookingEnabled = Boolean(req.body.bookingEnabled);
+    }
+    if (req.body.tokenPaymentStatus !== undefined) {
+      inquiry.tokenPaymentStatus = req.body.tokenPaymentStatus;
     }
     await inquiry.save();
 
@@ -1448,3 +1471,119 @@ exports.toggleWishlist = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Pay token amount for inquiry/property
+// @route   POST /api/properties/inquiries/:id/pay-token
+// @access  Private (Buyer)
+exports.payTokenAmount = async (req, res, next) => {
+  try {
+    const inquiry = await Inquiry.findById(req.params.id);
+    if (!inquiry) {
+      return next(new AppError('Inquiry not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const currentUserEmail = (req.user.email || '').toLowerCase();
+    const inquiryUserId = inquiry.user ? inquiry.user.toString() : null;
+    const inquiryEmail = (inquiry.email || '').toLowerCase();
+
+    // Verify buyer identity
+    if (inquiryUserId !== currentUserId && inquiryEmail !== currentUserEmail) {
+      return next(new AppError('Not authorized to make payment for this inquiry', 403));
+    }
+
+    if (!inquiry.tokenAmount || inquiry.tokenAmount <= 0) {
+      return next(new AppError('Token amount has not been set for this booking yet', 400));
+    }
+
+    const { paymentMethod = 'UPI', paymentRef } = req.body;
+    const generatedRef = paymentRef || `TXN-TOK-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    inquiry.tokenPaymentStatus = 'paid';
+    inquiry.tokenDate = new Date();
+    inquiry.tokenPaymentMethod = paymentMethod;
+    inquiry.tokenPaymentRef = generatedRef;
+    inquiry.lifecycleStage = 'token_paid';
+
+    const Booking = require('../models/Booking');
+
+    // Create or locate Booking document for official invoice generation
+    let bookingDoc = null;
+    if (inquiry.bookingRef) {
+      bookingDoc = await Booking.findById(inquiry.bookingRef);
+    }
+
+    if (!bookingDoc) {
+      const bookingNumber = `BK-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+      const projectProp = inquiry.property || inquiry.project;
+      const agreementValue = Number(projectProp?.price || inquiry.tokenAmount || 0);
+
+      bookingDoc = await Booking.create({
+        bookingNumber,
+        project: inquiry.project || (mongoose.Types.ObjectId.isValid(inquiry.property) ? inquiry.property : null) || null,
+        unit: inquiry.bookedUnit || null,
+        builder: inquiry.builder || (projectProp?.builder || projectProp?.user || null),
+        buyer: inquiry.user || req.user._id,
+        buyerName: inquiry.name || req.user.name || 'Buyer',
+        buyerPhone: inquiry.phone || req.user.phone || '',
+        buyerEmail: inquiry.email || req.user.email || '',
+        agent: inquiry.agent || null,
+        lead: inquiry._id,
+        isAttributed: Boolean(inquiry.isAttributed),
+        basePrice: agreementValue,
+        agreementValue,
+        tokenAmount: inquiry.tokenAmount,
+        tokenPaymentDate: new Date(),
+        status: 'confirmed',
+        paymentDetails: {
+          method: paymentMethod,
+          transactionRef: generatedRef,
+          paidAt: new Date(),
+        },
+        notes: inquiry.notes || '',
+      });
+      inquiry.bookingRef = bookingDoc._id;
+    } else {
+      bookingDoc.tokenAmount = inquiry.tokenAmount;
+      bookingDoc.tokenPaymentDate = new Date();
+      bookingDoc.paymentDetails = {
+        method: paymentMethod,
+        transactionRef: generatedRef,
+        paidAt: new Date(),
+      };
+      await bookingDoc.save();
+    }
+
+    await inquiry.save();
+
+    await LeadAuditLog.create({
+      lead: inquiry._id,
+      actor: req.user._id,
+      actorRole: req.user.role || 'buyer',
+      action: 'TOKEN_AMOUNT_PAID',
+      previousStage: inquiry.lifecycleStage || 'site_visit_done',
+      newStage: 'token_paid',
+      metadata: {
+        tokenAmount: inquiry.tokenAmount,
+        paymentMethod,
+        paymentRef: generatedRef,
+      },
+    }).catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      message: 'Token amount paid successfully! Booking confirmed.',
+      data: {
+        inquiryId: inquiry._id,
+        tokenAmount: inquiry.tokenAmount,
+        tokenPaymentStatus: inquiry.tokenPaymentStatus,
+        tokenPaymentRef: inquiry.tokenPaymentRef,
+        tokenPaymentMethod: inquiry.tokenPaymentMethod,
+        tokenDate: inquiry.tokenDate,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

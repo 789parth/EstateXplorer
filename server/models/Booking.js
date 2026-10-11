@@ -11,19 +11,22 @@ const bookingSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Property',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     unit: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ProjectUnit',
-      required: true,
+      required: false,
+      default: null,
       // index defined at schema level below (partial unique index for confirmed bookings)
     },
     builder: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     buyer: {

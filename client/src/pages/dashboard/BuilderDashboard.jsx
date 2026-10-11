@@ -112,6 +112,11 @@ const BuilderDashboard = () => {
   const [newVisitDate, setNewVisitDate] = useState('');
   const [newVisitTime, setNewVisitTime] = useState('');
 
+  // Token Amount Modal State (Enable Booking feature)
+  const [tokenModalVisit, setTokenModalVisit] = useState(null);
+  const [tokenAmountInput, setTokenAmountInput] = useState('');
+  const [savingTokenAmount, setSavingTokenAmount] = useState(false);
+
   // Agent Acquisition / Partnerships State (Spec §1, §5, §8, §9)
   const [partnerships, setPartnerships] = useState([]);
   const [partnershipsLoading, setPartnershipsLoading] = useState(false);
@@ -399,6 +404,56 @@ const BuilderDashboard = () => {
     setRescheduleItem(visit);
     setNewVisitDate(visit.visitDate || '');
     setNewVisitTime(visit.visitTime || '');
+  };
+
+  const handleOpenEnableBooking = (visit) => {
+    setTokenModalVisit(visit);
+    setTokenAmountInput(visit.tokenAmount ? String(visit.tokenAmount) : '');
+  };
+
+  const handleSaveTokenAmount = async (e) => {
+    if (e) e.preventDefault();
+    if (!tokenModalVisit) return;
+    const amount = Number(tokenAmountInput);
+    if (!amount || isNaN(amount) || amount <= 0) {
+      showToast('Please enter a valid positive token amount', 'error');
+      return;
+    }
+
+    try {
+      setSavingTokenAmount(true);
+      const res = await updateInquiryStatus(tokenModalVisit._id, tokenModalVisit.status || 'closed', {
+        tokenAmount: amount,
+        bookingEnabled: true,
+      });
+      if (res.success) {
+        showToast(`Token amount of ₹ ${amount.toLocaleString('en-IN')} set and booking enabled!`, 'success');
+        setInquiries((prev) =>
+          prev.map((inq) =>
+            inq._id === tokenModalVisit._id
+              ? {
+                  ...inq,
+                  tokenAmount: amount,
+                  bookingEnabled: true,
+                  ...(res.data || {}),
+                }
+              : inq
+          )
+        );
+        broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, {
+          action: 'token_amount_set',
+          inquiryId: tokenModalVisit._id,
+          tokenAmount: amount,
+          bookingEnabled: true,
+        });
+        setTokenModalVisit(null);
+        setTokenAmountInput('');
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to set token amount', 'error');
+    } finally {
+      setSavingTokenAmount(false);
+    }
   };
 
   const handleToggleSelectInquiry = (id) => {
@@ -1741,179 +1796,178 @@ const BuilderDashboard = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredVisits.map((visit) => {
-                      const isClosed = visit.status === 'closed';
-                      const isAgentLead = Boolean(visit.isAttributed || visit.agent || visit.agentCode);
-                      const projTitle = visit.projectName || visit.project?.title || visit.property?.title || visit.propertyTitle || 'Project';
-                      const propTitle = visit.propertyTitle || visit.property?.title || 'Main Unit';
-                      const agentName = visit.agent?.name || visit.agent?.agencyName || 'Channel Partner';
-                      const agentCode = visit.agentCode || visit.agent?.agentCode || 'CP-PARTNER';
-                      const maskedContact = visit.maskedBuyerContact || visit.buyerPhone || visit.phone || '+91******1234';
+                  <div className="space-y-3">
+                    <div className="max-h-[640px] overflow-y-auto modal-scroll pr-1">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredVisits.map((visit) => {
+                          const isClosed = visit.status === 'closed';
+                          const isAgentLead = Boolean(visit.isAttributed || visit.agent || visit.agentCode);
+                          const projTitle = visit.projectName || visit.project?.title || visit.property?.title || visit.propertyTitle || 'Project';
+                          const propTitle = visit.propertyTitle || visit.property?.title || 'Main Unit';
+                          const agentName = visit.agent?.name || visit.agent?.agencyName || 'Channel Partner';
+                          const agentCode = visit.agentCode || visit.agent?.agentCode || 'CP-PARTNER';
+                          const maskedContact = visit.maskedBuyerContact || visit.buyerPhone || visit.phone || '+91******1234';
 
-                      return (
-                        <div
-                          key={visit._id}
-                          className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
-                            }`}
-                        >
-                          <div>
-                            <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                  }`}
-                              >
-                                <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
-                              </span>
-                              <div className="flex items-center gap-1.5">
-                                {isClosed && (
-                                  <span className="px-1.5 py-0.2 rounded text-[0.62rem] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    Done
-                                  </span>
-                                )}
-                                <span className="text-[0.68rem] text-slate-400">
-                                  {new Date(visit.createdAt).toLocaleDateString()}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Project Name */}
-                            <div className="text-xs text-slate-600 font-medium mb-1 flex items-center gap-1">
-                              <span className="text-slate-400">Project:</span>
-                              <span className="font-bold text-slate-900 truncate">{projTitle}</span>
-                            </div>
-
-                            {/* Property / Unit */}
-                            <div className="text-xs text-slate-600 font-medium mb-2 flex items-center gap-1">
-                              <span className="text-slate-400">Property:</span>
-                              {visit.property?._id || (typeof visit.property === 'string' && visit.property) ? (
-                                <Link
-                                  to={`/property/${visit.property._id || visit.property}`}
-                                  className="text-blue-600 hover:underline font-semibold inline-flex items-center gap-1 truncate"
-                                >
-                                  {propTitle}
-                                  <ExternalLink size={10} />
-                                </Link>
-                              ) : (
-                                <span className="font-semibold text-slate-800 truncate">{propTitle}</span>
-                              )}
-                            </div>
-
-                            {/* Agent Indicator */}
-                            {isAgentLead ? (
-                              <div className="mb-2 p-2 rounded-lg bg-blue-50/70 border border-blue-200 text-xs">
-                                <div className="text-[0.66rem] text-blue-600 font-semibold uppercase tracking-wider">
-                                  Generated by Agent
+                          return (
+                            <div
+                              key={visit._id}
+                              className={`p-4 bg-white border rounded-xl shadow-xs transition-all flex flex-col justify-between ${isClosed ? 'border-emerald-200 bg-emerald-50/10' : 'border-slate-200 hover:border-amber-300'
+                                }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-[0.68rem] font-bold flex items-center gap-1 ${isClosed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                        }`}
+                                    >
+                                      <Clock size={11} /> {visit.visitDate || 'Date Requested'} · {visit.visitTime || 'Slot TBD'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    {isClosed && (
+                                      <span className="px-1.5 py-0.2 rounded text-[0.62rem] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        Done
+                                      </span>
+                                    )}
+                                    <span className="text-[0.68rem] text-slate-400">
+                                      {new Date(visit.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="font-bold text-blue-900 flex items-center justify-between gap-1 mt-0.5">
-                                  <span className="truncate">{agentName}</span>
-                                  <span className="font-mono text-[0.62rem] px-1.5 py-0.2 bg-white text-blue-800 rounded border border-blue-300 shrink-0">
-                                    {agentCode}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="mb-2 px-2 py-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[0.68rem] font-bold inline-flex items-center gap-1">
-                                <Globe size={11} /> Direct Website Visit (No Agent)
-                              </div>
-                            )}
 
-                            {/* Buyer Contact: Masked for Agent-Generated Lead, Full for Direct Lead */}
-                            {isAgentLead ? (
-                              <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
-                                <div className="font-mono font-bold text-slate-800 flex items-center gap-1.5">
-                                  <ShieldCheck size={12} className="text-amber-600 shrink-0" />
-                                  <span>{maskedContact}</span>
+                                {/* Project Name */}
+                                <div className="text-xs text-slate-600 font-medium mb-1 flex items-center gap-1">
+                                  <span className="text-slate-400">Project:</span>
+                                  <span className="font-bold text-slate-900 truncate">{projTitle}</span>
                                 </div>
-                                <div className="text-[0.68rem] text-slate-400 font-mono">
-                                  {visit.buyerEmail || visit.email || '***@***.com'}
+
+                                {/* Property / Unit */}
+                                <div className="text-xs text-slate-600 font-medium mb-2 flex items-center gap-1">
+                                  <span className="text-slate-400">Property:</span>
+                                  {visit.property?._id || (typeof visit.property === 'string' && visit.property) ? (
+                                    <Link
+                                      to={`/property/${visit.property._id || visit.property}`}
+                                      className="text-blue-600 hover:underline font-semibold inline-flex items-center gap-1 truncate"
+                                    >
+                                      {propTitle}
+                                      <ExternalLink size={10} />
+                                    </Link>
+                                  ) : (
+                                    <span className="font-semibold text-slate-800 truncate">{propTitle}</span>
+                                  )}
                                 </div>
-                                <span className="inline-block px-1.5 py-0.2 rounded text-[0.60rem] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                                  Masked for Agent Attribution
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
-                                <h4 className="font-bold text-sm text-slate-900 mb-1">{visit.name}</h4>
-                                {visit.phone && (
-                                  <div>
-                                    <a href={`tel:${visit.phone}`} className="hover:text-emerald-700 hover:underline inline-flex items-center gap-1.5 text-slate-600">
-                                      <Phone size={12} className="text-slate-400 shrink-0" /> {formatPhoneNumber(visit.phone)}
-                                    </a>
+
+                                {/* Agent Indicator */}
+                                {isAgentLead ? (
+                                  <div className="mb-2 p-2 rounded-lg bg-blue-50/70 border border-blue-200 text-xs">
+                                    <div className="text-[0.66rem] text-blue-600 font-semibold uppercase tracking-wider">
+                                      Generated by Agent
+                                    </div>
+                                    <div className="font-bold text-blue-900 flex items-center justify-between gap-1 mt-0.5">
+                                      <span className="truncate">{agentName}</span>
+                                      <span className="font-mono text-[0.62rem] px-1.5 py-0.2 bg-white text-blue-800 rounded border border-blue-300 shrink-0">
+                                        {agentCode}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="mb-2 px-2 py-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[0.68rem] font-bold inline-flex items-center gap-1">
+                                    <Globe size={11} /> Direct Website Visit (No Agent)
                                   </div>
                                 )}
-                                {visit.email && (
-                                  <div>
-                                    <a href={`mailto:${visit.email}`} className="hover:text-blue-700 hover:underline inline-flex items-center gap-1.5 text-slate-600 break-all">
-                                      <Mail size={12} className="text-slate-400 shrink-0" /> {visit.email}
-                                    </a>
+
+                                {/* Buyer Contact: Masked for Agent-Generated Lead, Full for Direct Lead */}
+                                {isAgentLead ? (
+                                  <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
+                                    <div className="font-mono font-bold text-slate-800 flex items-center gap-1.5">
+                                      <ShieldCheck size={12} className="text-amber-600 shrink-0" />
+                                      <span>{maskedContact}</span>
+                                    </div>
+                                    <div className="text-[0.68rem] text-slate-400 font-mono">
+                                      {visit.buyerEmail || visit.email || '***@***.com'}
+                                    </div>
+                                    <span className="inline-block px-1.5 py-0.2 rounded text-[0.60rem] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                      Masked for Agent Attribution
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="text-[0.72rem] text-slate-500 space-y-1 mb-3">
+                                    <h4 className="font-bold text-sm text-slate-900 mb-1">{visit.name}</h4>
+                                    {visit.phone && (
+                                      <div>
+                                        <a href={`tel:${visit.phone}`} className="hover:text-emerald-700 hover:underline inline-flex items-center gap-1.5 text-slate-600">
+                                          <Phone size={12} className="text-slate-400 shrink-0" /> {formatPhoneNumber(visit.phone)}
+                                        </a>
+                                      </div>
+                                    )}
+                                    {visit.email && (
+                                      <div>
+                                        <a href={`mailto:${visit.email}`} className="hover:text-blue-700 hover:underline inline-flex items-center gap-1.5 text-slate-600 break-all">
+                                          <Mail size={12} className="text-slate-400 shrink-0" /> {visit.email}
+                                        </a>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
                               </div>
-                            )}
-                          </div>
 
-                          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                            {isClosed ? (
-                              <>
-                                <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
-                                  <Check size={12} className="text-emerald-600" /> Completed
-                                </div>
-                                {visit.bookingRef ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => setInvoiceBookingId(typeof visit.bookingRef === 'object' ? visit.bookingRef._id : visit.bookingRef)}
-                                    className="py-1.5 px-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors cursor-pointer"
-                                  >
-                                    Invoice
-                                  </button>
-                                ) : (visit.property?.category === 'project' || visit.project) && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setBookingLead(visit)}
-                                    className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer"
-                                  >
-                                    Book Unit
-                                  </button>
+                              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                                {isClosed ? (
+                                  <>
+                                    <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
+                                      <Check size={12} className="text-emerald-600" /> Completed
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEnableBooking(visit)}
+                                      className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                      title="Set or update token amount to enable booking for buyer"
+                                    >
+                                      {visit.tokenAmount > 0 ? `Token: ₹ ${Number(visit.tokenAmount).toLocaleString('en-IN')}` : 'Enable Booking'}
+                                    </button>
+                                    {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || (visit.bookingRef && visit.tokenPaymentStatus !== 'unpaid')) ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setInvoiceBookingId(visit.bookingRef ? (typeof visit.bookingRef === 'object' ? visit.bookingRef._id : visit.bookingRef) : visit._id)}
+                                        className="py-1.5 px-3 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors cursor-pointer"
+                                      >
+                                        Invoice
+                                      </button>
+                                    ) : null}
+                                    <button
+                                      type="button"
+                                      title="Delete Site Visit"
+                                      onClick={(e) => handleDeleteSingleInquiry(visit._id, e)}
+                                      className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer shrink-0"
+                                    >
+                                      <Trash2 size={14} className="text-red-600" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => handleStatusChange(visit._id, 'closed')}
+                                      disabled={actionLoadingId === visit._id}
+                                      className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                                    >
+                                      <Check size={12} /> {actionLoadingId === visit._id ? 'Updating...' : 'Confirm & Done'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleOpenReschedule(visit)}
+                                      disabled={actionLoadingId === visit._id}
+                                      className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                                    >
+                                      Reschedule
+                                    </button>
+                                  </>
                                 )}
-                                <button
-                                  onClick={() => handleOpenReschedule(visit)}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                                >
-                                  Reschedule
-                                </button>
-                                <button
-                                  onClick={() => handleStatusChange(visit._id, 'visit')}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-2 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 text-slate-500 text-xs font-medium transition-colors cursor-pointer"
-                                  title="Revert to upcoming"
-                                >
-                                  Revert
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleStatusChange(visit._id, 'closed')}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="flex-1 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                                >
-                                  <Check size={12} /> {actionLoadingId === visit._id ? 'Updating...' : 'Confirm & Done'}
-                                </button>
-                                <button
-                                  onClick={() => handleOpenReschedule(visit)}
-                                  disabled={actionLoadingId === visit._id}
-                                  className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                                >
-                                  Reschedule
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2951,6 +3005,84 @@ const BuilderDashboard = () => {
                 <span>{actionPartnershipId === rejectReasonModal._id ? 'Rejecting...' : 'Confirm Reject'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5. Set Token Amount Modal (Enable Booking) ── */}
+      {tokenModalVisit && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl border border-slate-200 text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+              <h4 className="font-bold text-slate-900 text-base flex items-center gap-2 text-emerald-700">
+                <Check size={18} className="text-emerald-600" /> Set Token Amount
+              </h4>
+              <button
+                type="button"
+                onClick={() => {
+                  setTokenModalVisit(null);
+                  setTokenAmountInput('');
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-xs">
+              <div className="text-slate-500">
+                Buyer: <strong className="text-slate-800">{tokenModalVisit.name || 'Buyer'}</strong>
+              </div>
+              <div className="text-slate-500">
+                Property: <strong className="text-slate-800">{tokenModalVisit.propertyTitle || tokenModalVisit.propertyName || tokenModalVisit.projectName || 'Property'}</strong>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveTokenAmount}>
+              <div className="mb-5">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Token Amount (₹) <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-xs">₹</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={tokenAmountInput}
+                    onChange={(e) => setTokenAmountInput(e.target.value)}
+                    placeholder="e.g. 50000"
+                    className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-800 focus:outline-none focus:border-emerald-600"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[0.7rem] text-slate-500 mt-1.5">
+                  Setting this amount enables the buyer to view and pay the token amount directly from their account.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTokenModalVisit(null);
+                    setTokenAmountInput('');
+                  }}
+                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingTokenAmount}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <Check size={14} />
+                  <span>{savingTokenAmount ? 'Saving...' : 'Set Token Amount'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

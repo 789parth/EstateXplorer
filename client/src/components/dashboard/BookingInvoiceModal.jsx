@@ -43,10 +43,10 @@ const BookingInvoiceModal = ({ isOpen, onClose, bookingId }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 print:p-0 print:bg-white print:fixed print:inset-0">
-      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 text-left max-h-[92vh] overflow-y-auto print:max-h-none print:shadow-none print:border-none print:rounded-none">
+      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 text-left max-h-[90vh] flex flex-col overflow-hidden print:max-h-none print:shadow-none print:border-none print:rounded-none">
         
-        {/* Top bar with actions (hidden on print) */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/70 print:hidden">
+        {/* Top bar with actions (fixed header, hidden on print) */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50/90 backdrop-blur-xs shrink-0 print:hidden z-10">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
               <CheckCircle2 size={18} />
@@ -76,8 +76,8 @@ const BookingInvoiceModal = ({ isOpen, onClose, bookingId }) => {
           </div>
         </div>
 
-        {/* Content body */}
-        <div className="p-6 text-slate-800 space-y-6">
+        {/* Content body with proper, smooth scrollbar */}
+        <div className="p-6 text-slate-800 space-y-6 overflow-y-auto modal-scroll flex-1 print:overflow-visible print:p-0">
           {loading && (
             <div className="text-center py-12 text-slate-500 text-xs">
               Loading official booking invoice...

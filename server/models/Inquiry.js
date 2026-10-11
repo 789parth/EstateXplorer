@@ -147,6 +147,23 @@ const inquirySchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    bookingEnabled: {
+      type: Boolean,
+      default: false,
+    },
+    tokenPaymentStatus: {
+      type: String,
+      enum: ['unpaid', 'pending', 'paid'],
+      default: 'unpaid',
+    },
+    tokenPaymentMethod: {
+      type: String,
+      default: '',
+    },
+    tokenPaymentRef: {
+      type: String,
+      default: '',
+    },
     bookedUnit: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ProjectUnit',

@@ -160,6 +160,11 @@ export const getBuyerInquiries = async () => {
   return response.data;
 };
 
+export const payTokenAmountApi = async (id, paymentData = {}) => {
+  const response = await api.post(`/properties/inquiries/${id}/pay-token`, paymentData);
+  return response.data;
+};
+
 export const getUserWishlist = async () => {
   const response = await api.get('/properties/wishlist');
   return response.data;
