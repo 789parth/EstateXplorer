@@ -111,7 +111,13 @@ bookingSchema.index({ unit: 1, status: 1 });
 // Database-level double-booking prevention: only 1 confirmed booking per unit
 bookingSchema.index(
   { unit: 1 },
-  { unique: true, partialFilterExpression: { status: 'confirmed' } }
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: 'confirmed',
+      unit: { $exists: true, $type: 'objectId' },
+    },
+  }
 );
 
 module.exports = mongoose.model('Booking', bookingSchema);

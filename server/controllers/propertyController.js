@@ -1035,6 +1035,7 @@ exports.getBuyerInquiries = async (req, res, next) => {
     })
       .populate('property', 'title type category location priceDisplay images bhk')
       .populate('builder', 'name companyName role reraNumber')
+      .populate('bookingRef')
       .sort('-createdAt')
       .lean();
 
@@ -1504,57 +1505,64 @@ exports.payTokenAmount = async (req, res, next) => {
     inquiry.tokenPaymentMethod = paymentMethod;
     inquiry.tokenPaymentRef = generatedRef;
     inquiry.lifecycleStage = 'token_paid';
+    await inquiry.save();
 
     const Booking = require('../models/Booking');
 
     // Create or locate Booking document for official invoice generation
     let bookingDoc = null;
-    if (inquiry.bookingRef) {
-      bookingDoc = await Booking.findById(inquiry.bookingRef);
-    }
+    try {
+      if (inquiry.bookingRef) {
+        bookingDoc = await Booking.findById(inquiry.bookingRef);
+      }
 
-    if (!bookingDoc) {
-      const bookingNumber = `BK-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const projectProp = inquiry.property || inquiry.project;
-      const agreementValue = Number(projectProp?.price || inquiry.tokenAmount || 0);
+      if (!bookingDoc) {
+        let propertyDoc = null;
+        if (inquiry.property && mongoose.Types.ObjectId.isValid(inquiry.property)) {
+          propertyDoc = await Property.findById(inquiry.property);
+        }
+        const bookingNumber = `BK-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const agreementValue = Number(propertyDoc?.price || inquiry.tokenAmount || 0);
 
-      bookingDoc = await Booking.create({
-        bookingNumber,
-        project: inquiry.project || (mongoose.Types.ObjectId.isValid(inquiry.property) ? inquiry.property : null) || null,
-        unit: inquiry.bookedUnit || null,
-        builder: inquiry.builder || (projectProp?.builder || projectProp?.user || null),
-        buyer: inquiry.user || req.user._id,
-        buyerName: inquiry.name || req.user.name || 'Buyer',
-        buyerPhone: inquiry.phone || req.user.phone || '',
-        buyerEmail: inquiry.email || req.user.email || '',
-        agent: inquiry.agent || null,
-        lead: inquiry._id,
-        isAttributed: Boolean(inquiry.isAttributed),
-        basePrice: agreementValue,
-        agreementValue,
-        tokenAmount: inquiry.tokenAmount,
-        tokenPaymentDate: new Date(),
-        status: 'confirmed',
-        paymentDetails: {
+        bookingDoc = await Booking.create({
+          bookingNumber,
+          project: inquiry.project || (propertyDoc ? propertyDoc._id : null) || null,
+          unit: inquiry.bookedUnit || null,
+          builder: inquiry.builder || (propertyDoc?.builder || propertyDoc?.user || null),
+          buyer: inquiry.user || req.user._id,
+          buyerName: inquiry.name || req.user.name || 'Buyer',
+          buyerPhone: inquiry.phone || req.user.phone || '',
+          buyerEmail: inquiry.email || req.user.email || '',
+          agent: inquiry.agent || null,
+          lead: inquiry._id,
+          isAttributed: Boolean(inquiry.isAttributed),
+          basePrice: agreementValue,
+          agreementValue,
+          tokenAmount: inquiry.tokenAmount,
+          tokenPaymentDate: new Date(),
+          status: 'confirmed',
+          paymentDetails: {
+            method: paymentMethod,
+            transactionRef: generatedRef,
+            paidAt: new Date(),
+          },
+          notes: inquiry.notes || '',
+        });
+        inquiry.bookingRef = bookingDoc._id;
+        await inquiry.save();
+      } else {
+        bookingDoc.tokenAmount = inquiry.tokenAmount;
+        bookingDoc.tokenPaymentDate = new Date();
+        bookingDoc.paymentDetails = {
           method: paymentMethod,
           transactionRef: generatedRef,
           paidAt: new Date(),
-        },
-        notes: inquiry.notes || '',
-      });
-      inquiry.bookingRef = bookingDoc._id;
-    } else {
-      bookingDoc.tokenAmount = inquiry.tokenAmount;
-      bookingDoc.tokenPaymentDate = new Date();
-      bookingDoc.paymentDetails = {
-        method: paymentMethod,
-        transactionRef: generatedRef,
-        paidAt: new Date(),
-      };
-      await bookingDoc.save();
+        };
+        await bookingDoc.save();
+      }
+    } catch (bookingErr) {
+      console.error('Error creating/updating booking doc in payTokenAmount:', bookingErr);
     }
-
-    await inquiry.save();
 
     await LeadAuditLog.create({
       lead: inquiry._id,
@@ -1586,4 +1594,218 @@ exports.payTokenAmount = async (req, res, next) => {
     next(error);
   }
 };
+
+// @desc    Create Razorpay Order for inquiry token payment
+// @route   POST /api/properties/inquiries/:id/razorpay/create-order
+// @access  Private (Buyer)
+exports.createRazorpayOrder = async (req, res, next) => {
+  try {
+    const inquiry = await Inquiry.findById(req.params.id);
+    if (!inquiry) {
+      return next(new AppError('Inquiry not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const currentUserEmail = (req.user.email || '').toLowerCase();
+    const inquiryUserId = inquiry.user ? inquiry.user.toString() : null;
+    const inquiryEmail = (inquiry.email || '').toLowerCase();
+
+    if (inquiryUserId !== currentUserId && inquiryEmail !== currentUserEmail) {
+      return next(new AppError('Not authorized to make payment for this inquiry', 403));
+    }
+
+    if (!inquiry.tokenAmount || inquiry.tokenAmount <= 0) {
+      return next(new AppError('Token amount has not been set for this booking yet', 400));
+    }
+
+    if (inquiry.tokenPaymentStatus === 'paid') {
+      return next(new AppError('Token payment for this booking has already been completed', 400));
+    }
+
+    const Razorpay = require('razorpay');
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret) {
+      return next(new AppError('Razorpay is not configured on the server', 500));
+    }
+
+    const razorpay = new Razorpay({
+      key_id: keyId,
+      key_secret: keySecret,
+    });
+
+    const amountInPaise = Math.round(Number(inquiry.tokenAmount) * 100);
+    const receiptId = `rcpt_${String(inquiry._id).slice(-8)}_${Date.now().toString().slice(-6)}`;
+
+    const order = await razorpay.orders.create({
+      amount: amountInPaise,
+      currency: 'INR',
+      receipt: receiptId,
+      notes: {
+        inquiryId: inquiry._id.toString(),
+        buyerEmail: currentUserEmail,
+        propertyTitle: inquiry.propertyTitle || '',
+      },
+    });
+
+    inquiry.razorpayOrderId = order.id;
+    await inquiry.save();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orderId: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        keyId,
+        inquiryId: inquiry._id,
+        tokenAmount: inquiry.tokenAmount,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Verify Razorpay payment signature & confirm booking
+// @route   POST /api/properties/inquiries/:id/razorpay/verify-payment
+// @access  Private (Buyer)
+exports.verifyRazorpayPayment = async (req, res, next) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return next(new AppError('Missing payment verification details', 400));
+    }
+
+    const inquiry = await Inquiry.findById(req.params.id);
+    if (!inquiry) {
+      return next(new AppError('Inquiry not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const currentUserEmail = (req.user.email || '').toLowerCase();
+    const inquiryUserId = inquiry.user ? inquiry.user.toString() : null;
+    const inquiryEmail = (inquiry.email || '').toLowerCase();
+
+    if (inquiryUserId !== currentUserId && inquiryEmail !== currentUserEmail) {
+      return next(new AppError('Not authorized to verify payment for this inquiry', 403));
+    }
+
+    const crypto = require('crypto');
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keySecret) {
+      return next(new AppError('Razorpay secret key is missing on the server', 500));
+    }
+
+    // Verify Razorpay HMAC SHA256 Signature
+    const expectedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+
+    if (expectedSignature !== razorpay_signature) {
+      return next(new AppError('Payment signature verification failed. Invalid transaction.', 400));
+    }
+
+    inquiry.tokenPaymentStatus = 'paid';
+    inquiry.tokenDate = new Date();
+    inquiry.tokenPaymentMethod = 'Razorpay';
+    inquiry.tokenPaymentRef = razorpay_payment_id;
+    inquiry.razorpayOrderId = razorpay_order_id;
+    inquiry.lifecycleStage = 'token_paid';
+    await inquiry.save();
+
+    const Booking = require('../models/Booking');
+
+    // Create or update official Booking record for invoice generation
+    let bookingDoc = null;
+    try {
+      if (inquiry.bookingRef) {
+        bookingDoc = await Booking.findById(inquiry.bookingRef);
+      }
+
+      if (!bookingDoc) {
+        let propertyDoc = null;
+        if (inquiry.property && mongoose.Types.ObjectId.isValid(inquiry.property)) {
+          propertyDoc = await Property.findById(inquiry.property);
+        }
+        const bookingNumber = `BK-${Date.now().toString(36).toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const agreementValue = Number(propertyDoc?.price || inquiry.tokenAmount || 0);
+
+        bookingDoc = await Booking.create({
+          bookingNumber,
+          project: inquiry.project || (propertyDoc ? propertyDoc._id : null) || null,
+          unit: inquiry.bookedUnit || null,
+          builder: inquiry.builder || (propertyDoc?.builder || propertyDoc?.user || null),
+          buyer: inquiry.user || req.user._id,
+          buyerName: inquiry.name || req.user.name || 'Buyer',
+          buyerPhone: inquiry.phone || req.user.phone || '',
+          buyerEmail: inquiry.email || req.user.email || '',
+          agent: inquiry.agent || null,
+          lead: inquiry._id,
+          isAttributed: Boolean(inquiry.isAttributed),
+          basePrice: agreementValue,
+          agreementValue,
+          tokenAmount: inquiry.tokenAmount,
+          tokenPaymentDate: new Date(),
+          status: 'confirmed',
+          paymentDetails: {
+            method: 'Razorpay',
+            transactionRef: razorpay_payment_id,
+            paidAt: new Date(),
+          },
+          notes: inquiry.notes || '',
+        });
+        inquiry.bookingRef = bookingDoc._id;
+        await inquiry.save();
+      } else {
+        bookingDoc.tokenAmount = inquiry.tokenAmount;
+        bookingDoc.tokenPaymentDate = new Date();
+        bookingDoc.paymentDetails = {
+          method: 'Razorpay',
+          transactionRef: razorpay_payment_id,
+          paidAt: new Date(),
+        };
+        await bookingDoc.save();
+      }
+    } catch (bookingErr) {
+      console.error('Error creating/updating booking doc on Razorpay verification:', bookingErr);
+    }
+
+    await LeadAuditLog.create({
+      lead: inquiry._id,
+      actor: req.user._id,
+      actorRole: req.user.role || 'buyer',
+      action: 'TOKEN_AMOUNT_PAID_RAZORPAY',
+      previousStage: inquiry.lifecycleStage || 'site_visit_done',
+      newStage: 'token_paid',
+      metadata: {
+        tokenAmount: inquiry.tokenAmount,
+        paymentMethod: 'Razorpay',
+        paymentRef: razorpay_payment_id,
+        orderId: razorpay_order_id,
+      },
+    }).catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      message: 'Razorpay token payment verified and booking confirmed successfully!',
+      data: {
+        inquiryId: inquiry._id,
+        bookingId: bookingDoc._id,
+        tokenAmount: inquiry.tokenAmount,
+        tokenPaymentStatus: inquiry.tokenPaymentStatus,
+        tokenPaymentRef: inquiry.tokenPaymentRef,
+        tokenPaymentMethod: inquiry.tokenPaymentMethod,
+        tokenDate: inquiry.tokenDate,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 

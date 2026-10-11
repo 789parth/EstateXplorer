@@ -165,6 +165,16 @@ export const payTokenAmountApi = async (id, paymentData = {}) => {
   return response.data;
 };
 
+export const createRazorpayOrderApi = async (id) => {
+  const response = await api.post(`/properties/inquiries/${id}/razorpay/create-order`);
+  return response.data;
+};
+
+export const verifyRazorpayPaymentApi = async (id, verificationData) => {
+  const response = await api.post(`/properties/inquiries/${id}/razorpay/verify-payment`, verificationData);
+  return response.data;
+};
+
 export const getUserWishlist = async () => {
   const response = await api.get('/properties/wishlist');
   return response.data;

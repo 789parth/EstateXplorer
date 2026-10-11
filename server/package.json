@@ -25,6 +25,7 @@
     "mongoose": "^8.3.1",
     "multer": "^2.2.0",
     "nodemailer": "^10.0.12",
+    "razorpay": "^2.9.8",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {

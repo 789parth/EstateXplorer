@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { getProperties, getUserWishlist, toggleWishlistApi, getBuyerInquiries, payTokenAmountApi } from '../../services/propertyService';
-import { X, Heart, MessageSquare, Calendar, CreditCard, CheckCircle, ShieldCheck } from 'lucide-react';
+import { getProperties, getUserWishlist, toggleWishlistApi, getBuyerInquiries, payTokenAmountApi, createRazorpayOrderApi, verifyRazorpayPaymentApi } from '../../services/propertyService';
+import { X, Heart, MessageSquare, Calendar, CreditCard, CheckCircle, ShieldCheck, FileText } from 'lucide-react';
+import BookingInvoiceModal from '../../components/dashboard/BookingInvoiceModal';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
 import { formatPrice, getPublicImageUrl } from '../../utils/formatters';
 import './BuyerDashboard.css';
@@ -32,6 +33,7 @@ const BuyerDashboard = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentSuccessData, setPaymentSuccessData] = useState(null);
   const [paymentError, setPaymentError] = useState('');
+  const [invoiceBookingId, setInvoiceBookingId] = useState(null);
 
   // Load recently viewed from localStorage
   const loadRecentlyViewed = useCallback(() => {
@@ -52,67 +54,136 @@ const BuyerDashboard = () => {
     broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'clear_recently_viewed' });
   };
 
-  const handleOpenPaymentModal = (item) => {
-    setPaymentModalItem(item);
-    setPaymentMethod('UPI');
-    setUpiId(user?.email ? `${user.email.split('@')[0]}@okaxis` : 'buyer@okhdfcbank');
-    setCardNumber('4532 •••• •••• 8821');
-    setCardExpiry('08/29');
-    setCardCvv('•••');
-    setPaymentError('');
-    setPaymentSuccessData(null);
-    setIsProcessingPayment(false);
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
   };
 
-  const handleProcessPayment = async (e) => {
-    if (e) e.preventDefault();
-    if (!paymentModalItem) return;
-
+  const handlePayWithRazorpay = async (item) => {
+    if (!item) return;
     try {
       setIsProcessingPayment(true);
       setPaymentError('');
 
-      // Simulated secure gateway authorization delay (1s)
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      const generatedRef = `TXN-TOK-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const res = await payTokenAmountApi(paymentModalItem.inquiryId, {
-        paymentMethod,
-        paymentRef: generatedRef,
-      });
-
-      if (res.success) {
-        setPaymentSuccessData({
-          ...res.data,
-          propertyName: paymentModalItem.name,
-          tokenAmount: paymentModalItem.tokenAmount,
-          ref: res.data?.tokenPaymentRef || generatedRef,
-        });
-
-        // Update local state for visits and inquiries
-        setUpcomingVisits((prev) =>
-          prev.map((v) =>
-            v.inquiryId === paymentModalItem.inquiryId
-              ? { ...v, tokenPaymentStatus: 'paid', tokenPaymentRef: generatedRef, lifecycleStage: 'token_paid' }
-              : v
-          )
-        );
-        setInquiries((prev) =>
-          prev.map((i) =>
-            i.inquiryId === paymentModalItem.inquiryId
-              ? { ...i, tokenPaymentStatus: 'paid', tokenPaymentRef: generatedRef, lifecycleStage: 'token_paid' }
-              : i
-          )
-        );
-
-        broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, {
-          action: 'token_paid',
-          inquiryId: paymentModalItem.inquiryId,
-        });
+      const isLoaded = await loadRazorpayScript();
+      if (!isLoaded) {
+        setPaymentError('Razorpay SDK failed to load. Please check your internet connection.');
+        setIsProcessingPayment(false);
+        return;
       }
+
+      // Create Razorpay Order on Backend
+      const orderRes = await createRazorpayOrderApi(item.inquiryId);
+      if (!orderRes.success || !orderRes.data) {
+        setPaymentError(orderRes.message || 'Could not initiate payment order.');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      const { orderId, amount, currency, keyId } = orderRes.data;
+
+      const options = {
+        key: keyId,
+        amount,
+        currency: currency || 'INR',
+        name: 'EstateXplorer',
+        description: `Booking Token Payment for ${item.name}`,
+        order_id: orderId,
+        prefill: {
+          name: user?.name || '',
+          email: user?.email || '',
+          contact: user?.phone || '',
+        },
+        theme: {
+          color: '#16a34a',
+        },
+        handler: async (response) => {
+          try {
+            setIsProcessingPayment(true);
+            const verifyRes = await verifyRazorpayPaymentApi(item.inquiryId, {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+
+            if (verifyRes.success) {
+              const successPayload = {
+                ...verifyRes.data,
+                propertyName: item.name,
+                tokenAmount: item.tokenAmount,
+                ref: response.razorpay_payment_id,
+              };
+              setPaymentSuccessData(successPayload);
+              setPaymentModalItem(item);
+
+              // Update local state for visits and inquiries
+              setUpcomingVisits((prev) =>
+                prev.map((v) =>
+                  v.inquiryId === item.inquiryId
+                    ? {
+                        ...v,
+                        tokenPaymentStatus: 'paid',
+                        tokenPaymentRef: response.razorpay_payment_id,
+                        lifecycleStage: 'token_paid',
+                        bookingRef: verifyRes.data?.bookingId || v.bookingRef,
+                      }
+                    : v
+                )
+              );
+              setInquiries((prev) =>
+                prev.map((i) =>
+                  i.inquiryId === item.inquiryId
+                    ? {
+                        ...i,
+                        tokenPaymentStatus: 'paid',
+                        tokenPaymentRef: response.razorpay_payment_id,
+                        lifecycleStage: 'token_paid',
+                        bookingRef: verifyRes.data?.bookingId || i.bookingRef,
+                      }
+                    : i
+                )
+              );
+
+              broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, {
+                action: 'token_paid',
+                inquiryId: item.inquiryId,
+              });
+
+              // Re-fetch all data from backend to ensure consistent persistence
+              fetchBuyerData();
+            } else {
+              setPaymentError(verifyRes.message || 'Signature verification failed.');
+            }
+          } catch (verifyErr) {
+            setPaymentError(verifyErr.response?.data?.message || 'Payment verification failed.');
+          } finally {
+            setIsProcessingPayment(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessingPayment(false);
+          },
+        },
+      };
+
+      const razorpayInstance = new window.Razorpay(options);
+      razorpayInstance.on('payment.failed', (failRes) => {
+        setPaymentError(failRes.error?.description || 'Payment was unsuccessful.');
+        setIsProcessingPayment(false);
+      });
+      razorpayInstance.open();
     } catch (err) {
-      setPaymentError(err.response?.data?.message || 'Payment processing failed. Please try again.');
-    } finally {
+      setPaymentError(err.response?.data?.message || 'Failed to initiate payment.');
       setIsProcessingPayment(false);
     }
   };
@@ -161,15 +232,18 @@ const BuyerDashboard = () => {
             tokenPaymentStatus: inq.tokenPaymentStatus || (inq.lifecycleStage === 'token_paid' ? 'paid' : 'unpaid'),
             tokenPaymentRef: inq.tokenPaymentRef || '',
             tokenDate: inq.tokenDate || null,
+            bookingRef: inq.bookingRef || null,
             lifecycleStage: inq.lifecycleStage || 'new',
-            status: inq.status === 'expired'
+            status: (inq.tokenPaymentStatus === 'paid' || inq.lifecycleStage === 'token_paid')
+              ? 'Token Paid'
+              : inq.status === 'expired'
               ? 'Expired'
               : inq.status === 'visit'
               ? 'Site Visit Scheduled'
               : inq.status === 'contacted'
               ? 'Contacted'
               : inq.status === 'closed'
-              ? 'Closed'
+              ? 'Completed'
               : 'Awaiting Reply',
             statusRaw: inq.status,
           };
@@ -582,14 +656,24 @@ const BuyerDashboard = () => {
                               <strong style={{ color: '#15803d' }}>₹ {Number(inq.tokenAmount).toLocaleString('en-IN')}</strong>
                             </div>
                             {inq.tokenPaymentStatus === 'paid' ? (
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.7rem' }}>
-                                <CheckCircle size={12} /> Paid
-                              </span>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.7rem' }}>
+                                  <CheckCircle size={12} /> Paid
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setInvoiceBookingId(inq.bookingRef ? (typeof inq.bookingRef === 'object' ? inq.bookingRef._id : inq.bookingRef) : inq.inquiryId)}
+                                  style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '5px', padding: '3px 8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                >
+                                  <FileText size={11} /> Invoice
+                                </button>
+                              </div>
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => handleOpenPaymentModal(inq)}
-                                style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                disabled={isProcessingPayment}
+                                onClick={() => handlePayWithRazorpay(inq)}
+                                style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', opacity: isProcessingPayment ? 0.6 : 1 }}
                               >
                                 <CreditCard size={11} /> Pay Token
                               </button>
@@ -599,7 +683,19 @@ const BuyerDashboard = () => {
                       </div>
                       <div className="enquiry-right">
                         <div className="enquiry-time">{formatDate(inq.date)}</div>
-                        <span className={`status-pill ${inq.statusRaw === 'closed' ? 'closed' : inq.statusRaw === 'expired' ? 'expired' : inq.statusRaw === 'contacted' ? 'responded' : 'pending'}`}>{inq.status}</span>
+                        <span className={`status-pill ${
+                          (inq.tokenPaymentStatus === 'paid' || inq.lifecycleStage === 'token_paid')
+                            ? 'token-paid'
+                            : inq.statusRaw === 'closed'
+                            ? 'closed'
+                            : inq.statusRaw === 'expired'
+                            ? 'expired'
+                            : inq.statusRaw === 'contacted'
+                            ? 'responded'
+                            : 'pending'
+                        }`}>
+                          {inq.status}
+                        </span>
                       </div>
                     </div>
                   ))
@@ -652,14 +748,24 @@ const BuyerDashboard = () => {
                                 <strong style={{ color: '#15803d', fontSize: '0.82rem' }}>₹ {Number(visit.tokenAmount).toLocaleString('en-IN')}</strong>
                               </div>
                               {visit.tokenPaymentStatus === 'paid' ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.7rem' }}>
-                                  <CheckCircle size={12} /> Paid
-                                </span>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#15803d', fontWeight: 700, fontSize: '0.72rem' }}>
+                                    <CheckCircle size={12} /> Paid
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setInvoiceBookingId(visit.bookingRef ? (typeof visit.bookingRef === 'object' ? visit.bookingRef._id : visit.bookingRef) : visit.inquiryId)}
+                                    style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', borderRadius: '5px', padding: '3px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  >
+                                    <FileText size={11} /> Invoice
+                                  </button>
+                                </div>
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenPaymentModal(visit)}
-                                  style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  disabled={isProcessingPayment}
+                                  onClick={() => handlePayWithRazorpay(visit)}
+                                  style={{ background: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '5px', padding: '4px 10px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px', opacity: isProcessingPayment ? 0.6 : 1 }}
                                 >
                                   <CreditCard size={12} /> Pay Token
                                 </button>
@@ -668,8 +774,18 @@ const BuyerDashboard = () => {
                           )}
                         </div>
                         <div className="visit-actions" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                          <span className={`status-pill ${visit.statusRaw === 'closed' ? 'closed' : 'responded'}`}>
-                            {visit.statusRaw === 'closed' ? 'Completed' : 'Scheduled'}
+                          <span className={`status-pill ${
+                            (visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid')
+                              ? 'token-paid'
+                              : visit.statusRaw === 'closed'
+                              ? 'closed'
+                              : 'responded'
+                          }`}>
+                            {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid')
+                              ? 'Token Paid'
+                              : visit.statusRaw === 'closed'
+                              ? 'Completed'
+                              : 'Scheduled'}
                           </span>
                           <Link to={`/property/${visit.id}`} className="btn-sm primary">View Details</Link>
                         </div>
@@ -951,6 +1067,15 @@ const BuyerDashboard = () => {
 
           </div>
         </div>
+      )}
+
+      {/* Official Booking Invoice Modal */}
+      {Boolean(invoiceBookingId) && (
+        <BookingInvoiceModal
+          isOpen={Boolean(invoiceBookingId)}
+          bookingId={invoiceBookingId}
+          onClose={() => setInvoiceBookingId(null)}
+        />
       )}
 
     </div>

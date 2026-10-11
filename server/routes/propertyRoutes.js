@@ -16,6 +16,8 @@ const {
   bulkDeleteInquiries,
   replyToPropertyInquiry,
   payTokenAmount,
+  createRazorpayOrder,
+  verifyRazorpayPayment,
   getUserWishlist,
   toggleWishlist,
 } = require('../controllers/propertyController');
@@ -43,6 +45,8 @@ router.get('/inquiries/mine', protect, getMyInquiries);
 router.get('/inquiries/buyer', protect, getBuyerInquiries);
 router.post('/inquiries/bulk-delete', protect, bulkDeleteInquiries);
 router.post('/inquiries/:id/pay-token', protect, payTokenAmount);
+router.post('/inquiries/:id/razorpay/create-order', protect, createRazorpayOrder);
+router.post('/inquiries/:id/razorpay/verify-payment', protect, verifyRazorpayPayment);
 router.patch('/inquiries/:id', protect, updateInquiryStatus);
 router.delete('/inquiries/:id', protect, deleteInquiry);
 router.post('/inquiries/:id/reply', protect, replyToPropertyInquiry);

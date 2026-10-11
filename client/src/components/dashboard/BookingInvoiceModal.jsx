@@ -3,13 +3,15 @@ import { X, Printer, Download, CheckCircle2, Building2, User, Phone, Mail, Calen
 import { getBookingInvoiceApi } from '../../services/bookingService';
 import { formatPrice } from '../../utils/formatters';
 
-const BookingInvoiceModal = ({ isOpen, onClose, bookingId }) => {
+const BookingInvoiceModal = ({ isOpen = true, onClose, bookingId }) => {
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const shouldShow = Boolean(isOpen && bookingId);
+
   useEffect(() => {
-    if (!isOpen || !bookingId) {
+    if (!shouldShow) {
       setInvoice(null);
       setError('');
       return;
@@ -33,9 +35,9 @@ const BookingInvoiceModal = ({ isOpen, onClose, bookingId }) => {
     };
 
     fetchInvoice();
-  }, [isOpen, bookingId]);
+  }, [shouldShow, bookingId]);
 
-  if (!isOpen) return null;
+  if (!shouldShow) return null;
 
   const handlePrint = () => {
     window.print();

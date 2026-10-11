@@ -500,6 +500,7 @@
 .dashboard-wrapper .status-pill.responded { background:var(--info-bg); color:var(--info); }
 .dashboard-wrapper .status-pill.visit { background:rgba(196,165,116,.15); color:#8a6d3b; }
 .dashboard-wrapper .status-pill.closed { background:var(--success-bg); color:var(--success); }
+.dashboard-wrapper .status-pill.token-paid { background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; }
 .dashboard-wrapper .status-pill.expired { background:rgba(197,48,48,.08); color:var(--danger, #c53030); }
 
 /* Visit items */

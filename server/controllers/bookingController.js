@@ -339,9 +339,12 @@ exports.getBookingInvoice = async (req, res) => {
     }
 
     const currentUserId = String(req.user._id || req.user.id);
+    const currentUserEmail = (req.user.email || '').toLowerCase();
+    const buyerEmail = (booking.buyerEmail || booking.buyer?.email || '').toLowerCase();
+
     const isBuilder = booking.builder && String(booking.builder._id || booking.builder) === currentUserId;
     const isAgent = booking.agent && String(booking.agent._id || booking.agent) === currentUserId;
-    const isBuyer = booking.buyer && String(booking.buyer._id || booking.buyer) === currentUserId;
+    const isBuyer = (booking.buyer && String(booking.buyer._id || booking.buyer) === currentUserId) || (buyerEmail && buyerEmail === currentUserEmail);
     const isAdmin = req.user.role === 'admin';
 
     if (!isBuilder && !isAgent && !isBuyer && !isAdmin) {

@@ -164,6 +164,10 @@ const inquirySchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    razorpayOrderId: {
+      type: String,
+      default: '',
+    },
     bookedUnit: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'ProjectUnit',
