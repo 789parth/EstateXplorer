@@ -32,11 +32,12 @@ const { emitToUser, emitToUsers, SOCKET_EVENTS } = require('../services/socketMa
  * Rule: Admin can perform any transition. Builder & Agent are restricted.
  */
 const VALID_LIFECYCLE_TRANSITIONS = {
-  new: ['contacted', 'qualified', 'site_visit_scheduled', 'closed'],
-  contacted: ['qualified', 'site_visit_scheduled', 'closed'],
-  qualified: ['site_visit_scheduled', 'closed'],
-  site_visit_scheduled: ['site_visit_done', 'qualified', 'closed'],
-  site_visit_done: ['token_paid', 'qualified', 'closed'],
+  new: ['contacted', 'interested', 'qualified', 'site_visit_scheduled', 'closed'],
+  contacted: ['interested', 'qualified', 'site_visit_scheduled', 'closed'],
+  interested: ['contacted', 'site_visit_scheduled', 'qualified', 'token_paid', 'closed'],
+  qualified: ['interested', 'site_visit_scheduled', 'closed'],
+  site_visit_scheduled: ['site_visit_done', 'interested', 'qualified', 'closed'],
+  site_visit_done: ['token_paid', 'interested', 'qualified', 'closed'],
   token_paid: ['unit_booked', 'site_visit_done', 'closed'],
   unit_booked: ['commission_due', 'closed'],
   commission_due: ['commission_paid', 'closed'],
@@ -196,17 +197,27 @@ exports.getProperties = async (req, res, next) => {
   try {
     let query;
 
-    const reqQuery = { ...req.query, isActive: true };
+    // Public website strictly hides properties open for agent assignment or in inventory (Spec §1, §11)
+    const reqQuery = {
+      ...req.query,
+      isActive: true,
+      publishingStatus: { $in: ['published_direct', 'published_with_agent'] },
+    };
     const removeFields = ['select', 'sort', 'page', 'limit'];
     removeFields.forEach((param) => delete reqQuery[param]);
 
     let queryStr = JSON.stringify(reqQuery);
     queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
 
-    query = Property.find(JSON.parse(queryStr)).populate({
-      path: 'builder',
-      select: 'name companyName role reraNumber',
-    });
+    query = Property.find(JSON.parse(queryStr))
+      .populate({
+        path: 'builder',
+        select: 'name companyName role reraNumber',
+      })
+      .populate({
+        path: 'assignedAgent',
+        select: 'name email phone avatar agencyName reraNumber',
+      });
 
     if (req.query.sort) {
       const sortBy = req.query.sort.split(',').join(' ');
@@ -242,18 +253,36 @@ exports.getProperties = async (req, res, next) => {
 
 // @desc    Get single property by ID
 // @route   GET /api/properties/:id
-// @access  Public
+// @access  Public (Gated when open_for_agent or in_inventory)
 exports.getProperty = async (req, res, next) => {
   try {
     const property = await Property.findById(req.params.id)
       .populate({
         path: 'builder',
-        select: 'name companyName role reraNumber',
+        select: 'name companyName role reraNumber email phone',
+      })
+      .populate({
+        path: 'assignedAgent',
+        select: 'name email phone avatar agencyName reraNumber',
       })
       .lean();
 
     if (!property || !property.isActive) {
       return next(new AppError('Property not found', 404));
+    }
+
+    // Public Gating Rule (Spec §1, §11):
+    // If property is hidden from public (open_for_agent or in_inventory),
+    // only the property owner/builder, an agent evaluating for partnership, or admin may access details.
+    if (['open_for_agent', 'in_inventory'].includes(property.publishingStatus)) {
+      const currentUserId = req.user ? String(req.user.id || req.user._id) : null;
+      const builderId = property.builder ? String(property.builder._id || property.builder) : null;
+      const isOwner = currentUserId && (currentUserId === builderId || req.user.role === 'admin');
+      const isAgent = req.user && req.user.role === 'agent';
+
+      if (!isOwner && !isAgent) {
+        return next(new AppError('This property is currently not available on the public website.', 404));
+      }
     }
 
     // Increment visits asynchronously in background without blocking response
@@ -288,7 +317,11 @@ exports.recordPropertyAttribution = async (req, res, next) => {
 exports.getFeatured = async (req, res, next) => {
   try {
     const category = req.query.category || 'property';
-    const baseFilter = { isActive: true, category };
+    const baseFilter = {
+      isActive: true,
+      category,
+      publishingStatus: { $in: ['published_direct', 'published_with_agent'] },
+    };
 
     // Check cheaply if any featured listings exist before doing the full populate
     const featuredCount = await Property.countDocuments({ ...baseFilter, isFeatured: true });
@@ -297,6 +330,7 @@ exports.getFeatured = async (req, res, next) => {
     if (featuredCount > 0) {
       properties = await Property.find({ ...baseFilter, isFeatured: true })
         .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
+        .populate({ path: 'assignedAgent', select: 'name email phone avatar agencyName reraNumber' })
         .limit(4)
         .lean();
     } else {
@@ -304,6 +338,7 @@ exports.getFeatured = async (req, res, next) => {
       properties = await Property.find(baseFilter)
         .sort('-createdAt')
         .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
+        .populate({ path: 'assignedAgent', select: 'name email phone avatar agencyName reraNumber' })
         .limit(4)
         .lean();
     }
@@ -332,7 +367,14 @@ exports.getMyProperties = async (req, res, next) => {
       ? { isActive: true }
       : { builder: currentUserId, isActive: true };
 
-    const properties = await Property.find(filter).sort('-createdAt').limit(200).lean();
+    const properties = await Property.find(filter)
+      .populate({
+        path: 'assignedAgent',
+        select: 'name email phone avatar agencyName reraNumber',
+      })
+      .sort('-createdAt')
+      .limit(200)
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -759,9 +801,14 @@ exports.submitInquiry = async (req, res, next) => {
       }
     }
 
+    // Resolve Assigned Agent or Attribution (Spec Agent Workflow §5 & §6)
+    const assignedAgentId = property.assignedAgent
+      ? property.assignedAgent.toString()
+      : (attributionResult.agent ? attributionResult.agent.toString() : null);
+    const hasAssignedAgent = Boolean(assignedAgentId);
+
     // 7-day lifecycle window for inquiry (matches auto-reject window)
     const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
 
     // Create the inquiry record in MongoDB
     const inquiry = await Inquiry.create({
@@ -784,10 +831,10 @@ exports.submitInquiry = async (req, res, next) => {
       visitTime: visitTime || '',
       status: visitRequested ? 'visit' : 'new',
       expiresAt,
-      // Enterprise Channel Partner Attribution Fields
-      agent: attributionResult.agent || null,
+      // Enterprise Channel Partner & Assigned Agent Fields
+      agent: assignedAgentId || null,
       agentCode: attributionResult.agentCode || null,
-      isAttributed: attributionResult.isAttributed,
+      isAttributed: hasAssignedAgent,
       attributionExpiry: attributionResult.expiresAt || null,
       lifecycleStage: visitRequested ? 'site_visit_scheduled' : 'new',
     });
@@ -801,18 +848,20 @@ exports.submitInquiry = async (req, res, next) => {
       previousStage: 'none',
       newStage: 'new',
       metadata: {
-        isAttributed: attributionResult.isAttributed,
+        isAttributed: hasAssignedAgent,
         agentCode: attributionResult.agentCode,
+        assignedAgent: assignedAgentId,
       },
     }).catch((e) => console.warn('[Audit Log Warning]:', e.message));
 
     // Invalidate properties cache
     memoryCache.clear('properties');
 
-    // Trigger SMS and Email notification alerts asynchronously (non-blocking)
-    // If attributed, agent also receives notification
-    if (attributionResult.agent) {
-      User.findById(attributionResult.agent)
+    // Trigger Notifications & Lead Delivery (Spec Agent Workflow §6)
+    if (hasAssignedAgent) {
+      // Rule §6: If an Agent is assigned, the inquiry goes directly to the assigned Agent.
+      // The Builder/Owner does NOT receive a separate direct inquiry.
+      User.findById(assignedAgentId)
         .select('name email phone role smsNotifications emailNotifications')
         .then((agentUser) => {
           if (agentUser) {
@@ -821,9 +870,21 @@ exports.submitInquiry = async (req, res, next) => {
           }
         })
         .catch(() => {});
-    }
 
-    if (builderId) {
+      emitToUser(String(assignedAgentId), SOCKET_EVENTS.NEW_ATTRIBUTED_LEAD, {
+        inquiryId: inquiry._id,
+        propertyTitle: inquiry.propertyTitle,
+        propertyId: inquiry.property,
+        buyerName: inquiry.name,
+        buyerPhone: inquiry.phone,
+        buyerEmail: inquiry.email,
+        message: inquiry.message,
+        visitRequested: inquiry.visitRequested,
+        agentCode: inquiry.agentCode,
+        createdAt: inquiry.createdAt,
+      });
+    } else if (builderId) {
+      // Rule §6: If no Agent is assigned, inquiry goes directly to the Builder/Owner.
       User.findById(builderId)
         .select('name email phone role smsNotifications emailNotifications')
         .then((sellerUser) => {
@@ -839,17 +900,8 @@ exports.submitInquiry = async (req, res, next) => {
         .catch((err) => {
           console.warn('[Seller Lookup Alert Warning]:', err?.message || err);
         });
-    }
 
-    // Trigger confirmation email to buyer asynchronously (non-blocking)
-    notifyBuyerOnInquiryConfirmationEmail({ buyerUser: req.user, inquiry, property }).catch((err) => {
-      console.warn('[Buyer Confirmation Email Warning]:', err?.message || err);
-    });
-
-    // Real-time socket events — Spec §41: NEW_ATTRIBUTED_LEAD / LEAD_STATUS_UPDATED
-    // Agent gets full lead info (they are the attribution owner)
-    if (attributionResult.agent) {
-      emitToUser(String(attributionResult.agent), SOCKET_EVENTS.NEW_ATTRIBUTED_LEAD, {
+      emitToUser(String(builderId), SOCKET_EVENTS.NEW_INQUIRY, {
         inquiryId: inquiry._id,
         propertyTitle: inquiry.propertyTitle,
         propertyId: inquiry.property,
@@ -858,27 +910,15 @@ exports.submitInquiry = async (req, res, next) => {
         buyerEmail: inquiry.email,
         message: inquiry.message,
         visitRequested: inquiry.visitRequested,
-        agentCode: inquiry.agentCode,
+        isAttributed: false,
         createdAt: inquiry.createdAt,
       });
     }
-    // Builder gets masked notification (no full buyer contact — spec §16)
-    if (builderId) {
-      emitToUser(String(builderId), SOCKET_EVENTS.NEW_ATTRIBUTED_LEAD, {
-        inquiryId: inquiry._id,
-        propertyTitle: inquiry.propertyTitle,
-        propertyId: inquiry.property,
-        buyerName: inquiry.name,
-        buyerPhone: attributionResult.isAttributed ? maskPhone(inquiry.phone) : inquiry.phone,
-        buyerEmail: attributionResult.isAttributed ? maskEmail(inquiry.email) : inquiry.email,
-        message: inquiry.message,
-        visitRequested: inquiry.visitRequested,
-        isAttributed: attributionResult.isAttributed,
-        agentCode: attributionResult.isAttributed ? attributionResult.agentCode : null,
-        isContactMasked: attributionResult.isAttributed,
-        createdAt: inquiry.createdAt,
-      });
-    }
+
+    // Trigger confirmation email to buyer asynchronously (non-blocking)
+    notifyBuyerOnInquiryConfirmationEmail({ buyerUser: req.user, inquiry, property }).catch((err) => {
+      console.warn('[Buyer Confirmation Email Warning]:', err?.message || err);
+    });
 
     res.status(200).json({
       success: true,
@@ -955,12 +995,22 @@ exports.getMyInquiries = async (req, res, next) => {
       (targetRole === 'builder' || targetRole === 'owner') &&
       (userRoles.includes('builder') || userRoles.includes('owner') || activeRole === 'builder' || activeRole === 'owner')
     ) {
-      // Builder / Owner: single DB call for owned property IDs
+      // Builder / Owner: only receives direct inquiries (agent: null)
+      // Spec Rule §6: When an Agent is assigned, the inquiry goes directly to the Agent.
+      // Builder does not receive a separate direct inquiry.
       const ownedPropIds = (await Property.find({ builder: currentUserId }).select('_id').lean()).map((p) => p._id);
-      orConditions.push({ builder: currentUserId });
-      if (ownedPropIds.length > 0) {
-        orConditions.push({ property: { $in: ownedPropIds } });
-        orConditions.push({ project: { $in: ownedPropIds } });
+      if (req.query.includeAgentLeads === 'true' || req.query.propertyId) {
+        orConditions.push({ builder: currentUserId });
+        if (ownedPropIds.length > 0) {
+          orConditions.push({ property: { $in: ownedPropIds } });
+          orConditions.push({ project: { $in: ownedPropIds } });
+        }
+      } else {
+        orConditions.push({ builder: currentUserId, agent: null });
+        if (ownedPropIds.length > 0) {
+          orConditions.push({ property: { $in: ownedPropIds }, agent: null });
+          orConditions.push({ project: { $in: ownedPropIds }, agent: null });
+        }
       }
     } else {
       // Multi-role fallback — fetch owned props once, reuse for both builder+agent branches
@@ -1801,6 +1851,166 @@ exports.verifyRazorpayPayment = async (req, res, next) => {
         tokenPaymentRef: inquiry.tokenPaymentRef,
         tokenPaymentMethod: inquiry.tokenPaymentMethod,
         tokenDate: inquiry.tokenDate,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Open a property/project for Agent Assignment (Spec Agent Workflow §1, §4, §11)
+// @route   POST /api/properties/:id/open-for-agent
+// @access  Private (Builder, Owner, Admin)
+exports.openPropertyForAgent = async (req, res, next) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return next(new AppError('Property not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const builderId = property.builder ? property.builder.toString() : null;
+
+    if (req.user.role !== 'admin' && builderId !== currentUserId) {
+      return next(new AppError('Not authorized to manage this property', 403));
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000); // 15 days application period
+
+    property.publishingStatus = 'open_for_agent';
+    property.allowAgentAcquisition = true;
+    property.networkEnabled = true;
+    property.assignedAgent = null;
+    property.agentAssignedAt = null;
+    property.agentAssignmentOpenedAt = now;
+    property.agentAssignmentExpiresAt = expiresAt;
+
+    await property.save();
+    memoryCache.clear('properties');
+
+    emitToUsers(null, SOCKET_EVENTS.PROPERTIES, {
+      action: 'opened_for_agent',
+      propertyId: property._id,
+      title: property.title,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Property is now open for Agent Assignment. It is hidden from the public website and available for agents to apply for 15 days.',
+      data: property,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Publish property directly on public website without an agent (Spec Agent Workflow §4, §11)
+// @route   POST /api/properties/:id/publish-direct
+// @access  Private (Builder, Owner, Admin)
+exports.publishPropertyDirect = async (req, res, next) => {
+  try {
+    const property = await Property.findById(req.params.id);
+    if (!property) {
+      return next(new AppError('Property not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const builderId = property.builder ? property.builder.toString() : null;
+
+    if (req.user.role !== 'admin' && builderId !== currentUserId) {
+      return next(new AppError('Not authorized to publish this property', 403));
+    }
+
+    property.publishingStatus = 'published_direct';
+    property.allowAgentAcquisition = false;
+    property.networkEnabled = false;
+    property.assignedAgent = null;
+    property.agentAssignedAt = null;
+    property.agentAssignmentExpiresAt = null;
+
+    await property.save();
+    memoryCache.clear('properties');
+
+    // Reject any pending partnership requests since builder chose to publish directly
+    const Partnership = require('../models/Partnership');
+    await Partnership.updateMany(
+      { project: property._id, status: 'pending' },
+      { $set: { status: 'rejected', rejectionReason: 'Owner chose to publish the property directly without an agent', rejectedAt: new Date() } }
+    ).catch(() => {});
+
+    emitToUsers(null, SOCKET_EVENTS.PROPERTIES, {
+      action: 'published_direct',
+      propertyId: property._id,
+      title: property.title,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Property published directly on the public website without an agent. Inquiries will route directly to you.',
+      data: property,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Monitor performance of an assigned agent for a property (Spec Agent Workflow §9)
+// @route   GET /api/properties/:id/agent-performance
+// @access  Private (Builder, Owner, Admin)
+exports.getPropertyAgentPerformance = async (req, res, next) => {
+  try {
+    const property = await Property.findById(req.params.id)
+      .populate('assignedAgent', 'name email phone avatar agencyName reraNumber')
+      .populate('builder', 'name companyName email phone');
+
+    if (!property) {
+      return next(new AppError('Property not found', 404));
+    }
+
+    const currentUserId = (req.user.id || req.user._id)?.toString();
+    const builderId = property.builder ? (property.builder._id || property.builder).toString() : null;
+
+    if (req.user.role !== 'admin' && builderId !== currentUserId) {
+      return next(new AppError('Not authorized to view performance for this property', 403));
+    }
+
+    // Retrieve all inquiries for this property
+    const inquiries = await Inquiry.find({ property: property._id })
+      .populate('user', 'name email phone')
+      .sort('-createdAt')
+      .lean();
+
+    const totalInquiries = inquiries.length;
+    const newInquiries = inquiries.filter((i) => i.lifecycleStage === 'new').length;
+    const contactedBuyers = inquiries.filter((i) => i.lifecycleStage === 'contacted').length;
+    const scheduledVisits = inquiries.filter((i) => i.lifecycleStage === 'site_visit_scheduled' || i.visitRequested).length;
+    const completedVisits = inquiries.filter((i) => i.lifecycleStage === 'site_visit_done' || i.siteVisitCompleted).length;
+    const followUps = inquiries.filter((i) => i.followUpStatus === 'pending' || i.followUpStatus === 'completed').length;
+    const interestedBuyers = inquiries.filter((i) => i.lifecycleStage === 'interested').length;
+    const bookingsAndConversions = inquiries.filter((i) => ['token_paid', 'unit_booked', 'closed'].includes(i.lifecycleStage)).length;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        property: {
+          _id: property._id,
+          title: property.title,
+          publishingStatus: property.publishingStatus,
+          agentAssignedAt: property.agentAssignedAt,
+        },
+        assignedAgent: property.assignedAgent || null,
+        metrics: {
+          totalInquiries,
+          newInquiries,
+          contactedBuyers,
+          scheduledVisits,
+          completedVisits,
+          followUps,
+          interestedBuyers,
+          bookingsAndConversions,
+        },
+        inquiries,
       },
     });
   } catch (error) {

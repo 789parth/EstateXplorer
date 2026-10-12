@@ -134,6 +134,32 @@ const propertySchema = new mongoose.Schema(
       default: 0,
       min: [0, 'Available units cannot be negative'],
     },
+    // Agent Workflow & Publishing Lifecycle (Spec Agent Workflow §1, §3, §4, §5)
+    publishingStatus: {
+      type: String,
+      enum: ['in_inventory', 'open_for_agent', 'published_with_agent', 'published_direct'],
+      default: 'in_inventory',
+      index: true,
+    },
+    assignedAgent: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+    agentAssignmentOpenedAt: {
+      type: Date,
+      default: null,
+    },
+    agentAssignmentExpiresAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    agentAssignedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -181,5 +207,8 @@ propertySchema.index({ type: 1, isActive: 1 });
 propertySchema.index({ bhk: 1, isActive: 1 });
 propertySchema.index({ status: 1, isActive: 1 });
 propertySchema.index({ purpose: 1, isActive: 1 });
+propertySchema.index({ publishingStatus: 1, isActive: 1 });
+propertySchema.index({ assignedAgent: 1, publishingStatus: 1 });
+propertySchema.index({ publishingStatus: 1, agentAssignmentExpiresAt: 1 });
 
 module.exports = mongoose.model('Property', propertySchema);

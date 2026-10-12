@@ -138,11 +138,17 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
     throw new Error('Unauthorized. You do not own the project or property associated with this partnership.');
   }
 
-  // If approving, verify that project or property still allows agent acquisition
+  // If approving, verify that property exists and has no other agent assigned
   if (normalizedStatus === 'approved') {
-    if (partnership.project && !partnership.project.allowAgentAcquisition && !partnership.project.networkEnabled) {
-      throw new Error('Cannot accept request: Listing is no longer accepting agent acquisition.');
+    const property = await Property.findById(partnership.project?._id || partnership.project);
+    if (!property) {
+      throw new Error('Associated property not found.');
     }
+
+    if (property.assignedAgent && String(property.assignedAgent) !== String(partnership.agent)) {
+      throw new Error('Only one Agent can be assigned to a property/project at a time. This property already has an assigned Agent.');
+    }
+
     partnership.approvedAt = new Date();
     partnership.rejectedAt = null;
     if (!partnership.agentCode) {
@@ -156,11 +162,56 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
       partnership.commissionRate = Number(commissionRate);
     }
     // Ensure affiliateUrl is generated
-    partnership.affiliateUrl = `/property/${partnership.project._id}?agent=${partnership.agentCode}`;
+    partnership.affiliateUrl = `/property/${property._id}?agent=${partnership.agentCode}`;
+
+    // Assign Agent to Property & Publish to Public Website (Spec Agent Workflow §3 & §5)
+    property.assignedAgent = partnership.agent;
+    property.publishingStatus = 'published_with_agent';
+    property.agentAssignedAt = new Date();
+    property.allowAgentAcquisition = false;
+    property.networkEnabled = false;
+    await property.save();
+
+    // Invalidate properties cache so the listing is immediately visible publicly
+    const { memoryCache } = require('../utils/cache');
+    memoryCache.clear('properties');
+
+    // Rule §3 & §9: Multiple agents can apply, but only one is assigned; reject other pending applicants
+    const otherPending = await Partnership.find({
+      project: property._id,
+      _id: { $ne: partnership._id },
+      status: 'pending',
+    });
+
+    if (otherPending.length > 0) {
+      await Partnership.updateMany(
+        { project: property._id, _id: { $ne: partnership._id }, status: 'pending' },
+        {
+          $set: {
+            status: 'rejected',
+            rejectionReason: 'Another agent was selected and assigned to this property.',
+            rejectedAt: new Date(),
+          },
+        }
+      );
+
+      // Notify the unselected applicants
+      for (const other of otherPending) {
+        emitToUser(String(other.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
+          title: 'Agent Application Status',
+          message: `Another agent was selected for "${property.title}". You were not assigned.`,
+          partnershipId: other._id,
+          status: 'rejected',
+          projectId: property._id,
+          projectTitle: property.title,
+        });
+      }
+    }
   } else if (normalizedStatus === 'rejected') {
     partnership.rejectedAt = new Date();
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;
+    partnership.rejectionReason = String(rejectionReason || 'Application was declined by the owner.').trim().slice(0, 1000);
   } else if (normalizedStatus === 'suspended') {
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;
@@ -176,7 +227,7 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
     : 'Your Agent Request Has Been Rejected';
   const itemType = partnership.project?.category === 'project' ? 'project' : 'property';
   const notifMsg = normalizedStatus === 'approved'
-    ? `Congratulations! Your request to become an agent for "${partnership.project?.title || itemType}" was approved.`
+    ? `Congratulations! You have been assigned as the agent for "${partnership.project?.title || itemType}". The property is now public with your contact details!`
     : `Your request for "${partnership.project?.title || itemType}" was not accepted by the seller.`;
 
   emitToUser(String(partnership.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {

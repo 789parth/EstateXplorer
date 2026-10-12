@@ -20,6 +20,9 @@ const {
   verifyRazorpayPayment,
   getUserWishlist,
   toggleWishlist,
+  openPropertyForAgent,
+  publishPropertyDirect,
+  getPropertyAgentPerformance,
 } = require('../controllers/propertyController');
 const { protect, optionalAuth } = require('../middleware/authMiddleware');
 const { cacheMiddleware } = require('../utils/cache');
@@ -40,6 +43,11 @@ router.get('/mine', protect, getMyProperties);
 router.get('/wishlist', protect, getUserWishlist);
 router.post('/wishlist/:id', protect, toggleWishlist);
 
+// Agent Workflow Lifecycle routes (Spec Agent Workflow §1, §4, §9)
+router.post('/:id/open-for-agent', protect, openPropertyForAgent);
+router.post('/:id/publish-direct', protect, publishPropertyDirect);
+router.get('/:id/agent-performance', protect, getPropertyAgentPerformance);
+
 // Inquiry routes
 router.get('/inquiries/mine', protect, getMyInquiries);
 router.get('/inquiries/buyer', protect, getBuyerInquiries);
@@ -53,7 +61,7 @@ router.post('/inquiries/:id/reply', protect, replyToPropertyInquiry);
 
 router
   .route('/:id')
-  .get(cacheMiddleware('properties:detail', 60), getProperty)
+  .get(optionalAuth, getProperty)
   .patch(protect, updateProperty)
   .delete(protect, deleteProperty);
 

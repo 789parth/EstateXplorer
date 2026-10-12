@@ -12,10 +12,8 @@ exports.discoverProjects = async (req, res) => {
     const { city, search, category } = req.query;
     const query = {
       isActive: true,
-      $or: [
-        { allowAgentAcquisition: true },
-        { networkEnabled: true },
-      ],
+      publishingStatus: 'open_for_agent',
+      assignedAgent: null,
     };
 
     if (category && category !== 'all') {

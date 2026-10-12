@@ -598,10 +598,28 @@ const AgentDashboard = () => {
       );
     });
 
-  const newCount = inquiries.filter((e) => e.status === 'new').length;
+  // 8 Specific CRM Metrics required by Spec §9:
+  // 1. Total Inquiries
+  const totalInquiriesCount = inquiries.length;
+  // 2. New Inquiries
+  const newInquiriesCount = inquiries.filter((e) => e.status === 'new' || e.lifecycleStage === 'new').length;
+  // 3. Contacted Buyers
+  const contactedBuyersCount = inquiries.filter((e) => e.status === 'contacted' || e.lifecycleStage === 'contacted').length;
+  // 4. Scheduled Visits
+  const scheduledVisitsCount = inquiries.filter((e) => e.status === 'visit' || e.lifecycleStage === 'site_visit_scheduled' || (e.visitRequested && e.status !== 'closed')).length;
+  // 5. Completed Visits
+  const completedVisitsCount = inquiries.filter((e) => e.status === 'closed' || e.lifecycleStage === 'site_visit_done').length;
+  // 6. Follow-ups
+  const followUpsCount = inquiries.filter((e) => e.followUpStatus === 'pending' || e.lifecycleStage === 'qualified' || Boolean(e.followUpDate)).length;
+  // 7. Interested Buyers
+  const interestedBuyersCount = inquiries.filter((e) => e.lifecycleStage === 'interested').length;
+  // 8. Bookings & Conversions
+  const bookingsCount = inquiries.filter((e) => e.lifecycleStage === 'token_paid' || e.lifecycleStage === 'unit_booked' || e.tokenPaymentStatus === 'paid' || Boolean(e.bookingRef)).length;
+
+  const newCount = newInquiriesCount;
   const visitCount = siteVisitsList.length;
-  const contactedCount = inquiries.filter((e) => e.status === 'contacted').length;
-  const closedCount = inquiries.filter((e) => e.status === 'closed').length;
+  const contactedCount = contactedBuyersCount;
+  const closedCount = completedVisitsCount;
   const rejectedCount = inquiries.filter((e) => e.status === 'rejected').length;
 
   // Filtered Discover Projects & Properties (Spec §2)
@@ -815,58 +833,94 @@ const AgentDashboard = () => {
                 </p>
               </div>
 
-              {/* 4 STATS CARDS */}
-              <div className="stats-grid mb-6">
-                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('listings')}>
+              {/* 8 SPECIFIC CRM METRIC CARDS (Spec §9) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
                   <div className="stat-header">
                     <div className="stat-icon blue">
-                      <Briefcase size={20} />
+                      <MessageSquare size={18} />
                     </div>
-                    <span className="stat-trend up">Active</span>
+                    <span className="stat-trend up">Total</span>
                   </div>
-                  <div className="stat-value">{loading ? '...' : properties.length}</div>
-                  <div className="stat-label">Managed Listings</div>
+                  <div className="stat-value">{inqLoading ? '...' : totalInquiriesCount}</div>
+                  <div className="stat-label">Total Inquiries</div>
                 </div>
 
                 <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
                   <div className="stat-header">
                     <div className="stat-icon emerald">
-                      <Users size={20} />
+                      <Users size={18} />
                     </div>
-                    <span className="stat-trend up">Active</span>
+                    <span className="stat-trend up">New</span>
                   </div>
-                  <div className="stat-value">{inqLoading ? '...' : propertyInquiries.length}</div>
-                  <div className="stat-label">Property Inquiries</div>
+                  <div className="stat-value">{inqLoading ? '...' : newInquiriesCount}</div>
+                  <div className="stat-label">New Inquiries</div>
+                </div>
+
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
+                  <div className="stat-header">
+                    <div className="stat-icon navy">
+                      <Phone size={18} />
+                    </div>
+                    <span className="stat-trend up">Engaged</span>
+                  </div>
+                  <div className="stat-value">{inqLoading ? '...' : contactedBuyersCount}</div>
+                  <div className="stat-label">Contacted Buyers</div>
                 </div>
 
                 <div className="stat-card cursor-pointer" onClick={() => handleTabChange('visits')}>
                   <div className="stat-header">
                     <div className="stat-icon orange">
-                      <Calendar size={20} />
+                      <Calendar size={18} />
                     </div>
-                    <span className="stat-trend up">{siteVisitsList.length} Tours</span>
+                    <span className="stat-trend up">Scheduled</span>
                   </div>
-                  <div className="stat-value">{inqLoading ? '...' : siteVisitsList.length}</div>
-                  <div className="stat-label">Site Tour Requests</div>
+                  <div className="stat-value">{inqLoading ? '...' : scheduledVisitsCount}</div>
+                  <div className="stat-label">Scheduled Visits</div>
                 </div>
 
-                <div className="stat-card cursor-pointer" onClick={() => navigate('/dashboard/profile')}>
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('visits')}>
                   <div className="stat-header">
-                    <div className="stat-icon navy">
-                      <Award size={20} />
+                    <div className="stat-icon emerald">
+                      <CheckCircle2 size={18} />
                     </div>
-                    <span className="stat-trend up">Verified</span>
+                    <span className="stat-trend up">Completed</span>
                   </div>
-                  <div
-                    className="stat-value"
-                    style={{
-                      fontSize: user?.agentProfile?.experienceYears ? '1.5rem' : '1.35rem',
-                      letterSpacing: '0.02em',
-                    }}
-                  >
-                    {user?.agentProfile?.experienceYears ? `${user.agentProfile.experienceYears} Yrs` : 'RERA'}
+                  <div className="stat-value">{inqLoading ? '...' : completedVisitsCount}</div>
+                  <div className="stat-label">Completed Visits</div>
+                </div>
+
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
+                  <div className="stat-header">
+                    <div className="stat-icon orange">
+                      <Clock size={18} />
+                    </div>
+                    <span className="stat-trend up">Pending</span>
                   </div>
-                  <div className="stat-label">License &amp; Experience</div>
+                  <div className="stat-value">{inqLoading ? '...' : followUpsCount}</div>
+                  <div className="stat-label">Follow-ups</div>
+                </div>
+
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
+                  <div className="stat-header">
+                    <div className="stat-icon purple">
+                      <Award size={18} />
+                    </div>
+                    <span className="stat-trend up">Qualified</span>
+                  </div>
+                  <div className="stat-value">{inqLoading ? '...' : interestedBuyersCount}</div>
+                  <div className="stat-label">Interested Buyers</div>
+                </div>
+
+                <div className="stat-card cursor-pointer" onClick={() => handleTabChange('leads')}>
+                  <div className="stat-header">
+                    <div className="stat-icon emerald">
+                      <ShieldCheck size={18} />
+                    </div>
+                    <span className="stat-trend up">Converted</span>
+                  </div>
+                  <div className="stat-value">{inqLoading ? '...' : bookingsCount}</div>
+                  <div className="stat-label">Bookings &amp; Conversions</div>
                 </div>
               </div>
 
@@ -1430,23 +1484,34 @@ const AgentDashboard = () => {
                                   </div>
                                 </td>
 
-                                {/* Lead Status */}
+                                {/* Lead Status & Lifecycle Stage (Spec §8, §9) */}
                                 <td className="py-3 px-3 whitespace-nowrap">
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full text-[0.68rem] font-bold inline-flex items-center gap-1 ${lead.status === 'closed'
-                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                      : lead.status === 'contacted'
-                                        ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                        : lead.status === 'visit'
-                                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                                          : lead.status === 'rejected'
-                                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                                      }`}
-                                  >
-                                    <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                    {lead.status === 'visit' ? 'Site Visit' : lead.status ? lead.status.charAt(0).toUpperCase() + lead.status.slice(1) : 'New'}
-                                  </span>
+                                  <div className="flex flex-col gap-1">
+                                    <select
+                                      value={lead.lifecycleStage || (lead.status === 'closed' ? 'site_visit_done' : lead.status === 'visit' ? 'site_visit_scheduled' : lead.status || 'new')}
+                                      onChange={(e) => {
+                                        const newStage = e.target.value;
+                                        handleStatusChange(lead._id, newStage === 'site_visit_done' ? 'closed' : newStage === 'site_visit_scheduled' ? 'visit' : newStage, {
+                                          lifecycleStage: newStage
+                                        });
+                                      }}
+                                      className="text-[11px] font-bold py-1 px-2 rounded-lg border border-slate-300 bg-white focus:outline-none focus:border-blue-600 cursor-pointer"
+                                    >
+                                      <option value="new">New Inquiry</option>
+                                      <option value="contacted">Contacted</option>
+                                      <option value="interested">Interested</option>
+                                      <option value="site_visit_scheduled">Visit Scheduled</option>
+                                      <option value="site_visit_done">Visit Completed</option>
+                                      <option value="token_paid">Token Paid</option>
+                                      <option value="unit_booked">Unit Booked</option>
+                                    </select>
+
+                                    {lead.followUpStatus && lead.followUpStatus !== 'none' && (
+                                      <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded w-fit">
+                                        Follow-up: {lead.followUpStatus}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 <td className="py-3 px-3 text-slate-500 whitespace-nowrap">
@@ -1784,7 +1849,13 @@ const AgentDashboard = () => {
                                 )}
                               </div>
 
-                              <div className="absolute top-2.5 right-2.5">
+                              <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 flex-wrap justify-end">
+                                {item.agentAssignmentExpiresAt && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/90 text-white backdrop-blur-xs flex items-center gap-1 shadow-xs">
+                                    <Clock size={10} />
+                                    <span>{Math.max(0, Math.ceil((new Date(item.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24)))}d left to apply</span>
+                                  </span>
+                                )}
                                 <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-xs flex items-center gap-1">
                                   <Award size={11} /> {commissionRate}% Comm.
                                 </span>

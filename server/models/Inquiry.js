@@ -127,6 +127,7 @@ const inquirySchema = new mongoose.Schema(
       enum: [
         'new',
         'contacted',
+        'interested',
         'qualified',
         'site_visit_scheduled',
         'site_visit_done',
@@ -182,6 +183,20 @@ const inquirySchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    followUpStatus: {
+      type: String,
+      enum: ['none', 'pending', 'completed'],
+      default: 'none',
+      index: true,
+    },
+    followUpDate: {
+      type: Date,
+      default: null,
+    },
+    followUpNotes: {
+      type: String,
+      default: '',
+    },
     expiresAt: {
       type: Date,
       default: () => new Date(Date.now() + ATTRIBUTION_WINDOW_MS),
@@ -199,8 +214,7 @@ inquirySchema.index({ email: 1, createdAt: -1 });
 inquirySchema.index({ status: 1 });
 inquirySchema.index({ lifecycleStage: 1 });
 inquirySchema.index({ isAttributed: 1 });
-inquirySchema.index({ expiresAt: 1 });
-// Compound index for auto-reject job: filters on status IN [...] and createdAt <= threshold
-inquirySchema.index({ status: 1, createdAt: 1 });
+inquirySchema.index({ agent: 1, lifecycleStage: 1 });
+inquirySchema.index({ builder: 1, lifecycleStage: 1 });
 
 module.exports = mongoose.model('Inquiry', inquirySchema);

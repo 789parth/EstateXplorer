@@ -24,6 +24,9 @@ import {
   Copy,
   Check,
   Award,
+  Phone,
+  UserCheck,
+  User as UserIcon,
 } from 'lucide-react';
 import { getProperty, recordPropertyAttribution, submitInquiry, toggleWishlistApi, getUserWishlist, getMyInquiries, getBuyerInquiries } from '../services/propertyService';
 import { getProjectPartnership } from '../services/partnershipService';
@@ -361,10 +364,11 @@ const PropertyDetail = () => {
             console.error('Error saving recently viewed:', e);
           }
         } else {
-          setError('Property not found or has been removed.');
+          setError(res?.message || 'This property is currently not available on the public website.');
         }
       } catch (err) {
-        setError('Property not found or has been removed.');
+        const serverMsg = err.response?.data?.message;
+        setError(serverMsg || 'This property is currently not available on the public website.');
       } finally {
         setLoading(false);
       }
@@ -691,10 +695,20 @@ const PropertyDetail = () => {
   const safeActiveImg = activeImg < images.length ? activeImg : 0;
 
   const builder = property.builder || {};
-  const builderName = typeof builder === 'object' ? (builder.name || 'Unknown Builder') : 'Unknown Builder';
+  const builderName = typeof builder === 'object' ? (builder.name || 'Property Owner') : 'Property Owner';
   const builderPhone = typeof builder === 'object' ? (builder.phone || '') : '';
   const builderEmail = typeof builder === 'object' ? (builder.email || '') : '';
   const builderCompany = typeof builder === 'object' ? (builder.builderProfile?.companyName || '') : '';
+
+  // Phase 3: Assigned Agent Representation
+  const assignedAgent = property.assignedAgent || null;
+  const isAgentAssigned = Boolean(assignedAgent && (assignedAgent.name || assignedAgent._id));
+  const agentName = assignedAgent ? (assignedAgent.name || 'Authorized Agent') : '';
+  const agentPhone = assignedAgent ? (assignedAgent.phone || '') : '';
+  const agentEmail = assignedAgent ? (assignedAgent.email || '') : '';
+  const agentAgency = assignedAgent ? (assignedAgent.agencyName || assignedAgent.agentProfile?.agencyName || '') : '';
+  const agentRera = assignedAgent ? (assignedAgent.reraNumber || assignedAgent.agentProfile?.reraNumber || '') : '';
+  const agentAvatar = assignedAgent ? (assignedAgent.avatar || '') : '';
 
   return (
     <div className="pd-page">
@@ -1103,19 +1117,80 @@ const PropertyDetail = () => {
           {/* ── RIGHT: Sidebar ── */}
           <aside className="pd-sidebar space-y-4">
 
-            {/* Builder Card */}
-            <div className={`pd-card pd-builder-card ${isOwner ? '!border-blue-200 !bg-blue-50/40' : ''}`}>
-              <div className={`pd-builder-avatar ${isOwner ? '!bg-blue-600 !text-white' : ''}`}>
-                {builderName.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div className="pd-builder-label">
-                  {isOwner ? 'Your Listing' : 'Listed by'}
+            {/* Contact & Representation Card */}
+            {isAgentAssigned ? (
+              <div className="pd-card border border-indigo-200/90 bg-gradient-to-br from-indigo-50/70 via-white to-blue-50/40 p-4 rounded-2xl shadow-xs text-left space-y-3">
+                <div className="flex items-center justify-between pb-2.5 border-b border-indigo-100/80">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 uppercase tracking-wider">
+                    <UserCheck size={15} className="text-indigo-600" />
+                    <span>Assigned Agent</span>
+                  </div>
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    Official Representative
+                  </span>
                 </div>
-                <div className="pd-builder-name">{builderName}</div>
-                {builderCompany && <div className="pd-builder-company">{builderCompany}</div>}
+
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-bold text-lg flex items-center justify-center shrink-0 shadow-xs overflow-hidden">
+                    {agentAvatar ? (
+                      <img src={getPublicImageUrl(agentAvatar)} alt={agentName} className="w-full h-full object-cover" />
+                    ) : (
+                      agentName.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-bold text-slate-900 truncate">{agentName}</div>
+                    {agentAgency && (
+                      <div className="text-xs text-indigo-900 font-medium truncate">{agentAgency}</div>
+                    )}
+                    {agentRera && (
+                      <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">
+                        RERA: <span className="font-semibold text-slate-700">{agentRera}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 space-y-1.5 text-xs text-slate-600">
+                  {agentPhone && (
+                    <div className="flex items-center gap-2">
+                      <Phone size={13} className="text-indigo-600 shrink-0" />
+                      <a href={`tel:${agentPhone}`} className="hover:text-indigo-600 font-medium text-slate-800 transition-colors">
+                        {formatPhoneNumber(agentPhone)}
+                      </a>
+                    </div>
+                  )}
+                  {agentEmail && (
+                    <div className="flex items-center gap-2">
+                      <Mail size={13} className="text-indigo-600 shrink-0" />
+                      <a href={`mailto:${agentEmail}`} className="hover:text-indigo-600 truncate transition-colors">
+                        {agentEmail}
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Developer / Owner:</span>
+                  <span className="font-semibold text-slate-800 truncate max-w-[170px]">
+                    {builderCompany ? `${builderName} (${builderCompany})` : builderName}
+                  </span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className={`pd-card pd-builder-card ${isOwner ? '!border-blue-200 !bg-blue-50/40' : ''}`}>
+                <div className={`pd-builder-avatar ${isOwner ? '!bg-blue-600 !text-white' : ''}`}>
+                  {builderName.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <div className="pd-builder-label">
+                    {isOwner ? 'Your Listing' : 'Listed by'}
+                  </div>
+                  <div className="pd-builder-name">{builderName}</div>
+                  {builderCompany && <div className="pd-builder-company">{builderCompany}</div>}
+                </div>
+              </div>
+            )}
 
             {/* Agent-Builder Project Acquisition Workflow Card */}
             {user?.role === 'agent' && !isOwner && (property.category === 'project' || property.isProject) && (
@@ -1292,7 +1367,11 @@ const PropertyDetail = () => {
               <div className="pd-card pd-cta-card">
                 {/* Inquiry & Site Visit CTA */}
                 <h3>Interested in this property?</h3>
-                <p>Schedule a free verified site visit or connect with the representative.</p>
+                <p>
+                  {isAgentAssigned
+                    ? `Schedule a free verified site visit or connect with assigned agent ${agentName}.`
+                    : 'Schedule a free verified site visit or connect with the representative.'}
+                </p>
 
                 {/* ── Option 1: Book a Site Visit ── */}
                 {visitBooked ? (
@@ -1315,7 +1394,9 @@ const PropertyDetail = () => {
                         )}
                         {activeVisitData.notes && (
                           <div className="text-[0.72rem] text-emerald-800 bg-white/80 p-1.5 rounded-lg border border-emerald-100">
-                            <span className="font-semibold text-emerald-950">Representative:</span> &quot;{activeVisitData.notes}&quot;
+                            <span className="font-semibold text-emerald-950">
+                              {isAgentAssigned ? `Agent ${agentName}:` : 'Representative:'}
+                            </span> &quot;{activeVisitData.notes}&quot;
                           </div>
                         )}
                       </div>
@@ -1363,8 +1444,12 @@ const PropertyDetail = () => {
                 <h3>{inquiryMode === 'visit' ? 'Site Visit Booked!' : 'Inquiry Sent!'}</h3>
                 <p>
                   {inquiryMode === 'visit'
-                    ? 'Your visit request has been recorded in the database. The builder representative will confirm your scheduled slot shortly.'
-                    : 'The builder representative will contact you shortly. Thank you for your interest!'}
+                    ? (isAgentAssigned
+                        ? `Your visit request has been sent to assigned agent ${agentName}. They will confirm your scheduled slot shortly.`
+                        : 'Your visit request has been recorded in the database. The builder representative will confirm your scheduled slot shortly.')
+                    : (isAgentAssigned
+                        ? `Your inquiry has been sent directly to assigned agent ${agentName}. Thank you for your interest!`
+                        : 'The property representative will contact you shortly. Thank you for your interest!')}
                 </p>
               </div>
             ) : (
@@ -1372,6 +1457,11 @@ const PropertyDetail = () => {
                 <div className="pd-modal-head">
                   <h3>{inquiryMode === 'visit' ? 'Book a Site Visit' : 'Send Free Inquiry'}</h3>
                   <p>About: <strong>{property.title || property.name}</strong></p>
+                  {isAgentAssigned && (
+                    <p className="text-xs text-indigo-700 font-medium mt-1">
+                      Assigned Agent: <strong>{agentName}</strong> {agentAgency ? `(${agentAgency})` : ''}
+                    </p>
+                  )}
                 </div>
                 {inquiryError && (
                   <div className="pd-error-banner">

@@ -175,6 +175,23 @@ export const verifyRazorpayPaymentApi = async (id, verificationData) => {
   return response.data;
 };
 
+export const openPropertyForAgentApi = async (id) => {
+  invalidateClientPropertyCache();
+  const response = await api.post(`/properties/${id}/open-for-agent`);
+  return response.data;
+};
+
+export const publishPropertyDirectApi = async (id) => {
+  invalidateClientPropertyCache();
+  const response = await api.post(`/properties/${id}/publish-direct`);
+  return response.data;
+};
+
+export const getPropertyAgentPerformanceApi = async (id) => {
+  const response = await api.get(`/properties/${id}/agent-performance`);
+  return response.data;
+};
+
 export const getUserWishlist = async () => {
   const response = await api.get('/properties/wishlist');
   return response.data;

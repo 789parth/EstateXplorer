@@ -44,6 +44,9 @@ import {
   bulkDeleteInquiriesApi,
   replyToInquiryApi,
   updateProperty,
+  openPropertyForAgentApi,
+  publishPropertyDirectApi,
+  getPropertyAgentPerformanceApi,
 } from '../../services/propertyService';
 import {
   getBuilderPartnerships,
@@ -131,6 +134,11 @@ const BuilderDashboard = () => {
   const [rejectionReasonText, setRejectionReasonText] = useState('');
   const [actionPartnershipId, setActionPartnershipId] = useState(null);
   const [copiedLinkMap, setCopiedLinkMap] = useState({});
+
+  // Agent Performance Monitoring Modal State (Spec §10)
+  const [performanceModalProperty, setPerformanceModalProperty] = useState(null);
+  const [agentPerformanceData, setAgentPerformanceData] = useState(null);
+  const [performanceLoading, setPerformanceLoading] = useState(false);
 
   const handleOpenAddProject = useCallback((propToEdit = null) => {
     if (propToEdit) {
@@ -328,6 +336,53 @@ const BuilderDashboard = () => {
       showToast(err.response?.data?.message || 'Failed to reject agent request', 'error');
     } finally {
       setActionPartnershipId(null);
+    }
+  };
+
+  // Phase 4: Open Property For Agent Assignment (15-day window, hides property)
+  const handleOpenForAgent = async (propertyId) => {
+    try {
+      const res = await openPropertyForAgentApi(propertyId);
+      if (res.success) {
+        showToast(res.message || 'Property opened for agent assignment! Visible to agents for 15 days.', 'success');
+        await fetchProperties();
+        broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'opened_for_agent', id: propertyId });
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to open property for agent assignment', 'error');
+    }
+  };
+
+  // Phase 4: Publish Directly without an agent
+  const handlePublishDirect = async (propertyId) => {
+    try {
+      const res = await publishPropertyDirectApi(propertyId);
+      if (res.success) {
+        showToast(res.message || 'Property published directly on the public website!', 'success');
+        await fetchProperties();
+        broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'published_direct', id: propertyId });
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to publish property directly', 'error');
+    }
+  };
+
+  // Phase 4: View 8 Agent CRM Performance Metrics for Property
+  const handleViewAgentPerformance = async (property) => {
+    try {
+      setPerformanceModalProperty(property);
+      setPerformanceLoading(true);
+      const res = await getPropertyAgentPerformanceApi(property._id);
+      if (res.success && res.data) {
+        setAgentPerformanceData(res.data);
+      } else {
+        setAgentPerformanceData(null);
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to load agent performance metrics', 'error');
+      setAgentPerformanceData(null);
+    } finally {
+      setPerformanceLoading(false);
     }
   };
 
@@ -1333,39 +1388,81 @@ const BuilderDashboard = () => {
                           </div>
                         </div>
 
-                        {/* Agent Acquisition Setting & Agent Management (Spec §8) */}
-                        {(project.category === 'project' || project.isProject) && (
-                          <div className="px-3.5 py-2.5 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between text-xs gap-2">
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${project.allowAgentAcquisition || project.networkEnabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
-                              <span className="text-[11px] font-semibold text-slate-700 truncate">Agent Acquisition:</span>
-                              <span className={`text-[11px] font-bold shrink-0 ${project.allowAgentAcquisition || project.networkEnabled ? 'text-emerald-700' : 'text-slate-500'}`}>
-                                {project.allowAgentAcquisition || project.networkEnabled ? 'Enabled' : 'Disabled'}
+                        {/* Agent Workflow Status Badge & Action Controls (Spec §1, §3, §4, §10) */}
+                        <div className="px-3.5 py-2.5 bg-slate-50/90 border-t border-slate-100 flex flex-col gap-2 text-xs">
+                          <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                            <span className="text-[11px] font-semibold text-slate-600">Workflow Status:</span>
+                            {project.publishingStatus === 'open_for_agent' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                <Clock size={11} /> Open for Agents ({project.agentAssignmentExpiresAt ? Math.max(0, Math.ceil((new Date(project.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))) : 15}d left)
                               </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleAcquisition(project)}
-                                className={`text-[11px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer ${project.allowAgentAcquisition || project.networkEnabled
-                                  ? 'border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50'
-                                  : 'border-slate-300 text-slate-700 bg-white hover:bg-slate-100'
-                                  }`}
-                                title={project.allowAgentAcquisition || project.networkEnabled ? 'Click to disable agent acquisition' : 'Click to allow agents to acquire this project'}
-                              >
-                                {project.allowAgentAcquisition || project.networkEnabled ? 'Disable' : 'Enable'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setProjectAgentModal(project)}
-                                className="text-[11px] font-bold px-2 py-0.5 rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all flex items-center gap-1 cursor-pointer"
-                                title="Manage affiliated agents and pending requests for this project"
-                              >
-                                <Users size={11} /> Manage Agents
-                              </button>
-                            </div>
+                            ) : project.publishingStatus === 'published_with_agent' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <UserCheck size={11} /> Assigned: {project.assignedAgent?.name || 'Agent Partner'}
+                              </span>
+                            ) : project.publishingStatus === 'published_direct' ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
+                                <Globe size={11} /> Published Directly
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300">
+                                In Inventory (Hidden)
+                              </span>
+                            )}
                           </div>
-                        )}
+
+                          {/* Action Buttons based on publishing status */}
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/60">
+                            {(!project.publishingStatus || project.publishingStatus === 'in_inventory') && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenForAgent(project._id)}
+                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                                >
+                                  <Clock size={11} /> Open for Agent Assignment
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePublishDirect(project._id)}
+                                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                                >
+                                  <Globe size={11} /> Publish Directly
+                                </button>
+                              </>
+                            )}
+
+                            {project.publishingStatus === 'open_for_agent' && (
+                              <button
+                                type="button"
+                                onClick={() => handlePublishDirect(project._id)}
+                                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              >
+                                <Globe size={11} /> Publish Directly Now
+                              </button>
+                            )}
+
+                            {project.publishingStatus === 'published_direct' && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenForAgent(project._id)}
+                                className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              >
+                                <Clock size={11} /> Re-open for Agent Assignment
+                              </button>
+                            )}
+
+                            {project.publishingStatus === 'published_with_agent' && (
+                              <button
+                                type="button"
+                                onClick={() => handleViewAgentPerformance(project)}
+                                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              >
+                                <TrendingUp size={11} /> Agent Performance
+                              </button>
+                            )}
+                          </div>
+                        </div>
 
                         <div className="p-3 border-t border-slate-100 flex items-center justify-between bg-slate-50">
                           <Link
@@ -3083,6 +3180,119 @@ const BuilderDashboard = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── 6. Agent Performance Modal (Spec §10) ── */}
+      {performanceModalProperty && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-slate-200 text-left">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
+              <div>
+                <h4 className="font-bold text-slate-900 text-base flex items-center gap-2 text-indigo-700">
+                  <TrendingUp size={18} /> Assigned Agent Performance
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Property: <strong className="text-slate-800">{performanceModalProperty.title || performanceModalProperty.name}</strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPerformanceModalProperty(null);
+                  setAgentPerformanceData(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {performanceLoading ? (
+              <div className="py-12 text-center text-slate-500 text-xs">
+                <span className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin inline-block mr-2" />
+                Loading agent CRM metrics...
+              </div>
+            ) : !agentPerformanceData ? (
+              <div className="py-8 text-center text-slate-500 text-xs">
+                No performance data found for this property.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Agent Identity Card */}
+                <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[11px] text-slate-500 block">Assigned Agent</span>
+                    <strong className="text-indigo-950 font-bold text-sm">
+                      {agentPerformanceData.agent?.name || 'Agent Partner'}
+                    </strong>
+                    {agentPerformanceData.agent?.email && (
+                      <div className="text-[11px] text-slate-500">{agentPerformanceData.agent.email}</div>
+                    )}
+                  </div>
+                  {agentPerformanceData.agent?.phone && (
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 block">Phone</span>
+                      <strong className="text-slate-700">{agentPerformanceData.agent.phone}</strong>
+                    </div>
+                  )}
+                </div>
+
+                {/* 8 Specific Performance Metrics Grid (Spec §9, §10) */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Inquiries</span>
+                    <strong className="text-lg font-black text-slate-900 mt-0.5 block">{agentPerformanceData.metrics?.totalInquiries || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-blue-700 block">New Inquiries</span>
+                    <strong className="text-lg font-black text-blue-800 mt-0.5 block">{agentPerformanceData.metrics?.newInquiries || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-indigo-700 block">Contacted</span>
+                    <strong className="text-lg font-black text-indigo-800 mt-0.5 block">{agentPerformanceData.metrics?.contactedBuyers || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-amber-700 block">Visits Sched.</span>
+                    <strong className="text-lg font-black text-amber-800 mt-0.5 block">{agentPerformanceData.metrics?.scheduledVisits || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-emerald-700 block">Visits Done</span>
+                    <strong className="text-lg font-black text-emerald-800 mt-0.5 block">{agentPerformanceData.metrics?.completedVisits || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-purple-700 block">Follow-ups</span>
+                    <strong className="text-lg font-black text-purple-800 mt-0.5 block">{agentPerformanceData.metrics?.followUps || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-rose-700 block">Interested</span>
+                    <strong className="text-lg font-black text-rose-800 mt-0.5 block">{agentPerformanceData.metrics?.interestedBuyers || 0}</strong>
+                  </div>
+                  <div className="p-3 bg-teal-50 rounded-xl border border-teal-200 text-center">
+                    <span className="text-[10px] uppercase font-bold text-teal-700 block">Bookings</span>
+                    <strong className="text-lg font-black text-teal-800 mt-0.5 block">{agentPerformanceData.metrics?.bookingsOrConversions || 0}</strong>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-500 leading-relaxed italic bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                  Note: The complete buyer CRM pipeline and lead communication are managed exclusively by the assigned agent. High-level metrics are tracked here for your review.
+                </p>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-3 border-t border-slate-100 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setPerformanceModalProperty(null);
+                  setAgentPerformanceData(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

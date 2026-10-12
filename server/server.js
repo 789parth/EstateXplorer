@@ -17,6 +17,10 @@ connectDB();
 const threatIntelligenceSyncJob = require('./services/security/jobs/threatIntelligenceSyncJob');
 threatIntelligenceSyncJob.startScheduler();
 
+// Initialize 15-day agent assignment expiration background scheduler (Spec §4)
+const agentAssignmentExpirationJob = require('./services/agentAssignmentExpirationJob');
+agentAssignmentExpirationJob.startScheduler();
+
 // Create HTTP server and attach Socket.io for real-time events (Spec §7, §41)
 const httpServer = http.createServer(app);
 initSocket(httpServer);
