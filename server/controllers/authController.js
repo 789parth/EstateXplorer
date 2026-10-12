@@ -111,7 +111,7 @@ exports.register = async (req, res, next) => {
       return next(new AppError('Mobile number is already registered. Please log in or use a different mobile number.', 400));
     }
 
-    const userRoles = ['buyer', 'builder', 'agent', 'owner'];
+    const userRoles = [activeRole];
 
     const user = await User.create({
       name: normalizeTitleCase(name),
@@ -345,7 +345,7 @@ exports.verifyRegistrationOTP = async (req, res, next) => {
       );
     }
 
-    const userRoles = ['buyer', 'builder', 'agent', 'owner'];
+    const userRoles = [activeRole];
 
     // Create user with isVerified: true and standard portal roles
     const user = await User.create({
@@ -1156,16 +1156,19 @@ exports.googleAuth = async (req, res, next) => {
         });
       }
 
-      // Standard role handling for Google Sign-in (buyer, builder, agent, owner only):
+      // Standard role handling for Google Sign-in:
       if (chosenRole && ['buyer', 'builder', 'agent', 'owner'].includes(chosenRole)) {
-        if (!user.roles || !Array.isArray(user.roles)) {
-          user.roles = ['buyer', 'builder', 'agent', 'owner'];
-        } else if (!user.roles.includes(chosenRole)) {
-          user.roles.push(chosenRole);
+        if (!user.roles || !Array.isArray(user.roles) || user.roles.length === 0) {
+          user.roles = [chosenRole];
         }
-        user.role = chosenRole;
-      } else {
+        if (user.roles.includes(chosenRole)) {
+          user.role = chosenRole;
+        }
+      } else if (!user.role) {
         user.role = 'buyer';
+        if (!user.roles || user.roles.length === 0) {
+          user.roles = ['buyer'];
+        }
       }
       await user.save();
     } else {
@@ -1189,7 +1192,7 @@ exports.googleAuth = async (req, res, next) => {
       const activeRole = chosenRole && ['buyer', 'owner', 'builder', 'agent'].includes(chosenRole)
         ? chosenRole
         : 'buyer';
-      const userRoles = ['buyer', 'builder', 'agent', 'owner'];
+      const userRoles = [activeRole];
 
       user = await User.create({
         name,

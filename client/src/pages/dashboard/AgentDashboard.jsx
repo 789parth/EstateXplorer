@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -58,17 +58,18 @@ const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModa
 const BookingInvoiceModal = lazy(() => import('../../components/dashboard/BookingInvoiceModal'));
 const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
+const VALID_AGENT_TABS = ['overview', 'listings', 'leads', 'visits', 'find-projects', 'affiliations'];
+
 const AgentDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
   const { on, off } = useSocket(accessToken);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const validTabs = ['overview', 'listings', 'leads', 'visits', 'find-projects', 'affiliations'];
-  const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'overview');
+  const [activeTab, setActiveTab] = useState(VALID_AGENT_TABS.includes(tabFromUrl) ? tabFromUrl : 'overview');
 
   useEffect(() => {
-    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
+    if (tabFromUrl && VALID_AGENT_TABS.includes(tabFromUrl) && tabFromUrl !== activeTab) {
       setActiveTab(tabFromUrl);
     }
   }, [tabFromUrl]);
@@ -276,7 +277,7 @@ const AgentDashboard = () => {
       if (data.status === 'approved' || data.status === 'accepted') {
         showToast(`🎉 Congratulations! Your request for "${data.projectTitle}" has been approved!`, 'success');
       } else if (data.status === 'rejected') {
-        showToast(`ℹ️ Your request for "${data.projectTitle}" was declined by the developer.`, 'info');
+        showToast(`Your request for "${data.projectTitle}" has not been approved.`, 'info');
       }
     });
 
@@ -295,7 +296,9 @@ const AgentDashboard = () => {
 
   const handleCopyLink = (code, url, id) => {
     const targetUrl = url || `${window.location.origin}/property/${id}?agent=${code || user?.agentCode || user?._id}`;
-    navigator.clipboard.writeText(targetUrl);
+    navigator.clipboard.writeText(targetUrl).catch(() => {
+      showToast('Could not copy to clipboard. Please copy the link manually.', 'error');
+    });
     setCopiedLinkMap((prev) => ({ ...prev, [id]: true }));
     setTimeout(() => {
       setCopiedLinkMap((prev) => ({ ...prev, [id]: false }));
@@ -570,93 +573,123 @@ const AgentDashboard = () => {
   const siteVisitsList = inquiries.filter((e) => e.visitRequested || e.status === 'visit');
 
   // Filtered inquiries strictly for Property Inquiries Tab (no site visits, no phone search)
-  const filteredInquiries = propertyInquiries.filter((e) => {
-    if (!leadSearch) return true;
-    const q = leadSearch.toLowerCase();
-    return (
-      (e.name && e.name.toLowerCase().includes(q)) ||
-      (e.email && e.email.toLowerCase().includes(q)) ||
-      (e.property?.title && e.property.title.toLowerCase().includes(q)) ||
-      (e.propertyTitle && e.propertyTitle.toLowerCase().includes(q)) ||
-      (e.message && e.message.toLowerCase().includes(q))
-    );
-  });
-
-  // Filtered properties
-  const filteredProperties = properties
-    .filter((p) => {
-      if (propertyStatusFilter === 'all') return true;
-      return p.status === propertyStatusFilter;
-    })
-    .filter((p) => {
-      if (!propertySearch) return true;
-      const q = propertySearch.toLowerCase();
+  const filteredInquiries = useMemo(() => {
+    return propertyInquiries.filter((e) => {
+      if (!leadSearch) return true;
+      const q = leadSearch.toLowerCase();
       return (
-        (p.title && p.title.toLowerCase().includes(q)) ||
-        (p.location?.city && p.location.city.toLowerCase().includes(q)) ||
-        (p.location?.address && p.location.address.toLowerCase().includes(q))
+        (e.name && e.name.toLowerCase().includes(q)) ||
+        (e.email && e.email.toLowerCase().includes(q)) ||
+        (e.property?.title && e.property.title.toLowerCase().includes(q)) ||
+        (e.propertyTitle && e.propertyTitle.toLowerCase().includes(q)) ||
+        (e.message && e.message.toLowerCase().includes(q))
       );
     });
+  }, [propertyInquiries, leadSearch]);
+
+  // Filtered properties (only properties where no other agent is assigned, or assigned to current agent)
+  const filteredProperties = useMemo(() => {
+    return properties
+      .filter((p) => {
+        // Hide property if builder assigned an agent and it is not this agent
+        if (p.assignedAgent) {
+          const assignedId = String(p.assignedAgent._id || p.assignedAgent);
+          const myId = String(user?._id || user?.id);
+          if (assignedId !== myId) return false;
+        }
+        if (propertyStatusFilter === 'all') return true;
+        return p.status === propertyStatusFilter;
+      })
+      .filter((p) => {
+        if (!propertySearch) return true;
+        const q = propertySearch.toLowerCase();
+        return (
+          (p.title && p.title.toLowerCase().includes(q)) ||
+          (p.location?.city && p.location.city.toLowerCase().includes(q)) ||
+          (p.location?.address && p.location.address.toLowerCase().includes(q))
+        );
+      });
+  }, [properties, propertyStatusFilter, propertySearch, user]);
 
   // 8 Specific CRM Metrics required by Spec §9:
-  // 1. Total Inquiries
-  const totalInquiriesCount = inquiries.length;
-  // 2. New Inquiries
-  const newInquiriesCount = inquiries.filter((e) => e.status === 'new' || e.lifecycleStage === 'new').length;
-  // 3. Contacted Buyers
-  const contactedBuyersCount = inquiries.filter((e) => e.status === 'contacted' || e.lifecycleStage === 'contacted').length;
-  // 4. Scheduled Visits
-  const scheduledVisitsCount = inquiries.filter((e) => e.status === 'visit' || e.lifecycleStage === 'site_visit_scheduled' || (e.visitRequested && e.status !== 'closed')).length;
-  // 5. Completed Visits
-  const completedVisitsCount = inquiries.filter((e) => e.status === 'closed' || e.lifecycleStage === 'site_visit_done').length;
-  // 6. Follow-ups
-  const followUpsCount = inquiries.filter((e) => e.followUpStatus === 'pending' || e.lifecycleStage === 'qualified' || Boolean(e.followUpDate)).length;
-  // 7. Interested Buyers
-  const interestedBuyersCount = inquiries.filter((e) => e.lifecycleStage === 'interested').length;
-  // 8. Bookings & Conversions
-  const bookingsCount = inquiries.filter((e) => e.lifecycleStage === 'token_paid' || e.lifecycleStage === 'unit_booked' || e.tokenPaymentStatus === 'paid' || Boolean(e.bookingRef)).length;
+  const crmMetrics = useMemo(() => {
+    return {
+      totalInquiriesCount: inquiries.length,
+      newInquiriesCount: inquiries.filter((e) => e.status === 'new' || e.lifecycleStage === 'new').length,
+      contactedBuyersCount: inquiries.filter((e) => e.status === 'contacted' || e.lifecycleStage === 'contacted').length,
+      scheduledVisitsCount: inquiries.filter((e) => e.status === 'visit' || e.lifecycleStage === 'site_visit_scheduled' || (e.visitRequested && e.status !== 'closed')).length,
+      completedVisitsCount: inquiries.filter((e) => e.status === 'closed' || e.lifecycleStage === 'site_visit_done').length,
+      followUpsCount: inquiries.filter((e) => e.followUpStatus === 'pending' || e.lifecycleStage === 'qualified' || Boolean(e.followUpDate)).length,
+      interestedBuyersCount: inquiries.filter((e) => e.lifecycleStage === 'interested').length,
+      bookingsCount: inquiries.filter((e) => e.lifecycleStage === 'token_paid' || e.lifecycleStage === 'unit_booked' || e.tokenPaymentStatus === 'paid' || Boolean(e.bookingRef)).length,
+      rejectedCount: inquiries.filter((e) => e.status === 'rejected').length,
+    };
+  }, [inquiries]);
+
+  const {
+    totalInquiriesCount,
+    newInquiriesCount,
+    contactedBuyersCount,
+    scheduledVisitsCount,
+    completedVisitsCount,
+    followUpsCount,
+    interestedBuyersCount,
+    bookingsCount,
+    rejectedCount,
+  } = crmMetrics;
 
   const newCount = newInquiriesCount;
   const visitCount = siteVisitsList.length;
   const contactedCount = contactedBuyersCount;
   const closedCount = completedVisitsCount;
-  const rejectedCount = inquiries.filter((e) => e.status === 'rejected').length;
 
   // Filtered Discover Projects & Properties (Spec §2)
-  const filteredDiscoverProjects = discoverProjectsList.filter((p) => {
-    if (discoverSearch.trim()) {
-      const q = discoverSearch.toLowerCase().trim();
-      const title = (p.title || p.name || '').toLowerCase();
-      const city = (p.location?.city || '').toLowerCase();
-      const seller = (p.builder?.companyName || p.builder?.name || p.user?.companyName || p.user?.name || '').toLowerCase();
-      if (!title.includes(q) && !city.includes(q) && !seller.includes(q)) return false;
-    }
-    if (discoverCityFilter !== 'all') {
-      const city = (p.location?.city || '').toLowerCase();
-      if (city !== discoverCityFilter.toLowerCase()) return false;
-    }
-    if (discoverTypeFilter !== 'all') {
-      const type = (p.type || p.propertyType || '').toLowerCase();
-      if (!type.includes(discoverTypeFilter.toLowerCase())) return false;
-    }
-    return true;
-  });
+  const filteredDiscoverProjects = useMemo(() => {
+    return discoverProjectsList
+      .filter((p) => {
+        // Once builder selects an agent, hide from Find Projects
+        if (p.assignedAgent || p.publishingStatus === 'published_with_agent') {
+          return false;
+        }
+        return true;
+      })
+      .filter((p) => {
+        if (discoverSearch.trim()) {
+          const q = discoverSearch.toLowerCase().trim();
+          const title = (p.title || p.name || '').toLowerCase();
+          const city = (p.location?.city || '').toLowerCase();
+          const seller = (p.builder?.companyName || p.builder?.name || p.user?.companyName || p.user?.name || '').toLowerCase();
+          if (!title.includes(q) && !city.includes(q) && !seller.includes(q)) return false;
+        }
+        if (discoverCityFilter !== 'all') {
+          const city = (p.location?.city || '').toLowerCase();
+          if (city !== discoverCityFilter.toLowerCase()) return false;
+        }
+        if (discoverTypeFilter !== 'all') {
+          const type = (p.type || p.propertyType || '').toLowerCase();
+          if (!type.includes(discoverTypeFilter.toLowerCase())) return false;
+        }
+        return true;
+      });
+  }, [discoverProjectsList, discoverSearch, discoverCityFilter, discoverTypeFilter]);
 
   // Filtered My Affiliations (Spec §7)
-  const filteredAffiliations = myPartnerships.filter((item) => {
-    if (affiliationFilter !== 'all') {
-      if (affiliationFilter === 'approved' && item.status !== 'approved' && item.status !== 'accepted') return false;
-      if (affiliationFilter === 'pending' && item.status !== 'pending') return false;
-      if (affiliationFilter === 'rejected' && item.status !== 'rejected') return false;
-    }
-    if (affiliationSearch.trim()) {
-      const q = affiliationSearch.toLowerCase().trim();
-      const title = (item.project?.title || item.project?.name || '').toLowerCase();
-      const seller = (item.project?.builder?.companyName || item.project?.builder?.name || item.builder?.companyName || item.builder?.name || '').toLowerCase();
-      if (!title.includes(q) && !seller.includes(q)) return false;
-    }
-    return true;
-  });
+  const filteredAffiliations = useMemo(() => {
+    return myPartnerships.filter((item) => {
+      if (affiliationFilter !== 'all') {
+        if (affiliationFilter === 'approved' && item.status !== 'approved' && item.status !== 'accepted') return false;
+        if (affiliationFilter === 'pending' && item.status !== 'pending') return false;
+        if (affiliationFilter === 'rejected' && item.status !== 'rejected') return false;
+      }
+      if (affiliationSearch.trim()) {
+        const q = affiliationSearch.toLowerCase().trim();
+        const title = (item.project?.title || item.project?.name || '').toLowerCase();
+        const seller = (item.project?.builder?.companyName || item.project?.builder?.name || item.builder?.companyName || item.builder?.name || '').toLowerCase();
+        if (!title.includes(q) && !seller.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [myPartnerships, affiliationFilter, affiliationSearch]);
 
   const affiliatedApprovedCount = myPartnerships.filter((p) => p.status === 'approved' || p.status === 'accepted').length;
   const affiliatedPendingCount = myPartnerships.filter((p) => p.status === 'pending').length;
@@ -1905,6 +1938,19 @@ const AgentDashboard = () => {
                                   </span>
                                 </div>
                               </div>
+
+                              {/* Commission Offered */}
+                              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                                <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1">
+                                  <Award size={13} className="text-emerald-600" />
+                                  <span>Offered Commission</span>
+                                </span>
+                                <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
+                                  {item.commissionAmount > 0
+                                    ? `₹ ${Number(item.commissionAmount).toLocaleString('en-IN')}`
+                                    : `${item.defaultCommissionRate || 2.5}%`}
+                                </span>
+                              </div>
                             </div>
                           </div>
 
@@ -1924,10 +1970,15 @@ const AgentDashboard = () => {
                                 </button>
                               </div>
                             ) : isPending ? (
-                              <div className="w-full py-1.5 px-3 rounded-xl bg-amber-100 text-amber-800 font-semibold text-xs flex items-center justify-center gap-1.5 border border-amber-300">
+                              <button
+                                type="button"
+                                onClick={() => showToast('You have already applied.', 'info')}
+                                className="w-full py-2 px-3 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-800 font-bold text-xs flex items-center justify-center gap-1.5 border border-amber-300 transition-colors cursor-pointer"
+                                title="You have already applied."
+                              >
                                 <Clock size={13} />
-                                <span>Request Sent — Pending Approval</span>
-                              </div>
+                                <span>Requested</span>
+                              </button>
                             ) : isRejected ? (
                               <div className="flex items-center gap-2">
                                 <button
@@ -2553,10 +2604,7 @@ const AgentDashboard = () => {
               ) : (
                 <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-rose-950 space-y-1">
                   <div>
-                    Developer <strong>{statusNotificationModal.builderName}</strong> declined your request for:
-                  </div>
-                  <div className="font-bold text-sm text-rose-800 pt-0.5">
-                    &ldquo;{statusNotificationModal.projectTitle}&rdquo;
+                    Your request for <strong>&ldquo;{statusNotificationModal.projectTitle}&rdquo;</strong> has not been approved.
                   </div>
                   {statusNotificationModal.rejectionReason && (
                     <div className="text-[11px] text-slate-700 italic pt-1 bg-white p-2 rounded border border-rose-200">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense, lazy } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -63,16 +63,17 @@ const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModa
 const BookingInvoiceModal = lazy(() => import('../../components/dashboard/BookingInvoiceModal'));
 const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
+const VALID_BUILDER_TABS = ['overview', 'projects', 'leads', 'visits', 'requests'];
+
 const BuilderDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
   const { on, off } = useSocket(accessToken);
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
-  const validTabs = ['overview', 'projects', 'leads', 'visits', 'requests'];
-  const [activeTab, setActiveTab] = useState(validTabs.includes(tabFromUrl) ? tabFromUrl : 'overview');
+  const [activeTab, setActiveTab] = useState(VALID_BUILDER_TABS.includes(tabFromUrl) ? tabFromUrl : 'overview');
 
   useEffect(() => {
-    if (tabFromUrl && validTabs.includes(tabFromUrl) && tabFromUrl !== activeTab) {
+    if (tabFromUrl && VALID_BUILDER_TABS.includes(tabFromUrl) && tabFromUrl !== activeTab) {
       setActiveTab(tabFromUrl);
     }
   }, [tabFromUrl]);
@@ -388,7 +389,9 @@ const BuilderDashboard = () => {
 
   const handleCopyLink = (code, url, id) => {
     const targetUrl = url || `${window.location.origin}/property/${id}?agent=${code}`;
-    navigator.clipboard.writeText(targetUrl);
+    navigator.clipboard.writeText(targetUrl).catch(() => {
+      showToast('Could not copy to clipboard. Please copy the link manually.', 'error');
+    });
     setCopiedLinkMap((prev) => ({ ...prev, [id]: true }));
     setTimeout(() => {
       setCopiedLinkMap((prev) => ({ ...prev, [id]: false }));
@@ -667,86 +670,94 @@ const BuilderDashboard = () => {
   const directVisitsCount = siteVisitsList.filter((e) => !Boolean(e.isAttributed || e.agent || e.agentCode)).length;
 
   // Filtered general inquiries (Strictly excludes site visit requests)
-  const filteredInquiries = propertyInquiries
-    .filter((e) => {
+  const filteredInquiries = useMemo(() => {
+    return propertyInquiries
+      .filter((e) => {
+        const isAgentLead = Boolean(e.isAttributed || e.agent || e.agentCode);
+        if (leadSourceFilter === 'agent') return isAgentLead;
+        if (leadSourceFilter === 'direct') return !isAgentLead;
+        return true;
+      })
+      .filter((e) => {
+        if (!leadSearch) return true;
+        const q = leadSearch.toLowerCase().trim();
+        return (
+          (e.name && e.name.toLowerCase().includes(q)) ||
+          (e.email && e.email.toLowerCase().includes(q)) ||
+          (e.property?.title && e.property.title.toLowerCase().includes(q)) ||
+          (e.propertyTitle && e.propertyTitle.toLowerCase().includes(q)) ||
+          (e.projectName && e.projectName.toLowerCase().includes(q)) ||
+          (e.agent?.name && e.agent.name.toLowerCase().includes(q)) ||
+          (e.agentCode && e.agentCode.toLowerCase().includes(q))
+        );
+      });
+  }, [propertyInquiries, leadSourceFilter, leadSearch]);
+
+  // Filtered site visits
+  const filteredVisits = useMemo(() => {
+    return siteVisitsList.filter((e) => {
       const isAgentLead = Boolean(e.isAttributed || e.agent || e.agentCode);
       if (leadSourceFilter === 'agent') return isAgentLead;
       if (leadSourceFilter === 'direct') return !isAgentLead;
       return true;
-    })
-    .filter((e) => {
-      if (!leadSearch) return true;
-      const q = leadSearch.toLowerCase().trim();
-      return (
-        (e.name && e.name.toLowerCase().includes(q)) ||
-        (e.email && e.email.toLowerCase().includes(q)) ||
-        (e.property?.title && e.property.title.toLowerCase().includes(q)) ||
-        (e.propertyTitle && e.propertyTitle.toLowerCase().includes(q)) ||
-        (e.projectName && e.projectName.toLowerCase().includes(q)) ||
-        (e.agent?.name && e.agent.name.toLowerCase().includes(q)) ||
-        (e.agentCode && e.agentCode.toLowerCase().includes(q))
-      );
     });
-
-  // Filtered site visits
-  const filteredVisits = siteVisitsList.filter((e) => {
-    const isAgentLead = Boolean(e.isAttributed || e.agent || e.agentCode);
-    if (leadSourceFilter === 'agent') return isAgentLead;
-    if (leadSourceFilter === 'direct') return !isAgentLead;
-    return true;
-  });
+  }, [siteVisitsList, leadSourceFilter]);
 
   // Filtered projects
-  const filteredProjects = projects
-    .filter((p) => {
-      if (projectStatusFilter === 'all') return true;
-      return p.status === projectStatusFilter;
-    })
-    .filter((p) => {
-      if (projectCategoryFilter === 'all') return true;
-      const isProj = p.category === 'project' || p.isProject || p.propertyType === 'project' || Boolean(p.unitsCount || p.towersCount);
-      return projectCategoryFilter === 'project' ? isProj : !isProj;
-    })
-    .filter((p) => {
-      if (!projectSearch) return true;
-      const q = projectSearch.toLowerCase();
-      return (
-        (p.title && p.title.toLowerCase().includes(q)) ||
-        (p.location?.city && p.location.city.toLowerCase().includes(q)) ||
-        (p.location?.address && p.location.address.toLowerCase().includes(q))
-      );
-    });
+  const filteredProjects = useMemo(() => {
+    return projects
+      .filter((p) => {
+        if (projectStatusFilter === 'all') return true;
+        return p.status === projectStatusFilter;
+      })
+      .filter((p) => {
+        if (projectCategoryFilter === 'all') return true;
+        const isProj = p.category === 'project' || p.isProject || p.propertyType === 'project' || Boolean(p.unitsCount || p.towersCount);
+        return projectCategoryFilter === 'project' ? isProj : !isProj;
+      })
+      .filter((p) => {
+        if (!projectSearch) return true;
+        const q = projectSearch.toLowerCase();
+        return (
+          (p.title && p.title.toLowerCase().includes(q)) ||
+          (p.location?.city && p.location.city.toLowerCase().includes(q)) ||
+          (p.location?.address && p.location.address.toLowerCase().includes(q))
+        );
+      });
+  }, [projects, projectStatusFilter, projectCategoryFilter, projectSearch]);
 
   const visitCount = siteVisitsList.length;
   const newCount = propertyInquiries.length;
   const closedCount = inquiries.filter((e) => e.status === 'closed').length;
 
   // Filtered agent partnership requests (Spec §5)
-  const filteredPartnerships = partnerships.filter((req) => {
-    if (partnershipProjectFilter !== 'all') {
-      const projId = req.project?._id || req.project;
-      if (String(projId) !== String(partnershipProjectFilter)) return false;
-    }
-    if (partnershipStatusFilter !== 'all') {
-      if (partnershipStatusFilter === 'pending' && req.status !== 'pending') return false;
-      if (partnershipStatusFilter === 'accepted' && req.status !== 'approved' && req.status !== 'accepted') return false;
-      if (partnershipStatusFilter === 'rejected' && req.status !== 'rejected') return false;
-    }
-    if (partnershipSearch.trim()) {
-      const q = partnershipSearch.toLowerCase().trim();
-      const agentName = (req.agent?.name || req.agentProfile?.user?.name || '').toLowerCase();
-      const agentEmail = (req.agent?.email || req.agentProfile?.user?.email || '').toLowerCase();
-      const projTitle = (req.project?.title || '').toLowerCase();
-      if (!agentName.includes(q) && !agentEmail.includes(q) && !projTitle.includes(q)) {
-        return false;
+  const filteredPartnerships = useMemo(() => {
+    return partnerships.filter((req) => {
+      if (partnershipProjectFilter !== 'all') {
+        const projId = req.project?._id || req.project;
+        if (String(projId) !== String(partnershipProjectFilter)) return false;
       }
-    }
-    return true;
-  }).sort((a, b) => {
-    const timeA = new Date(a.createdAt || 0).getTime();
-    const timeB = new Date(b.createdAt || 0).getTime();
-    return partnershipDateSort === 'asc' ? timeA - timeB : timeB - timeA;
-  });
+      if (partnershipStatusFilter !== 'all') {
+        if (partnershipStatusFilter === 'pending' && req.status !== 'pending') return false;
+        if (partnershipStatusFilter === 'accepted' && req.status !== 'approved' && req.status !== 'accepted') return false;
+        if (partnershipStatusFilter === 'rejected' && req.status !== 'rejected') return false;
+      }
+      if (partnershipSearch.trim()) {
+        const q = partnershipSearch.toLowerCase().trim();
+        const agentName = (req.agent?.name || req.agentProfile?.user?.name || '').toLowerCase();
+        const agentEmail = (req.agent?.email || req.agentProfile?.user?.email || '').toLowerCase();
+        const projTitle = (req.project?.title || '').toLowerCase();
+        if (!agentName.includes(q) && !agentEmail.includes(q) && !projTitle.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    }).sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return partnershipDateSort === 'asc' ? timeA - timeB : timeB - timeA;
+    });
+  }, [partnerships, partnershipProjectFilter, partnershipStatusFilter, partnershipSearch, partnershipDateSort]);
 
   const pendingPartnershipsCount = partnerships.filter((p) => p.status === 'pending').length;
   const approvedPartnershipsCount = partnerships.filter((p) => p.status === 'approved' || p.status === 'accepted').length;
@@ -2015,14 +2026,16 @@ const BuilderDashboard = () => {
                                     <div className="flex-1 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold flex items-center justify-center gap-1">
                                       <Check size={12} className="text-emerald-600" /> Completed
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenEnableBooking(visit)}
-                                      className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1"
-                                      title="Set or update token amount to enable booking for buyer"
-                                    >
-                                      {visit.tokenAmount > 0 ? `Token: ₹ ${Number(visit.tokenAmount).toLocaleString('en-IN')}` : 'Enable Booking'}
-                                    </button>
+                                    {!(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || (visit.bookingRef && visit.tokenPaymentStatus !== 'unpaid')) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEnableBooking(visit)}
+                                        className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1"
+                                        title="Set or update token amount to enable booking for buyer"
+                                      >
+                                        {visit.tokenAmount > 0 ? `Token: ₹ ${Number(visit.tokenAmount).toLocaleString('en-IN')}` : 'Enable Booking'}
+                                      </button>
+                                    )}
                                     {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || (visit.bookingRef && visit.tokenPaymentStatus !== 'unpaid')) ? (
                                       <button
                                         type="button"
@@ -2238,11 +2251,22 @@ const BuilderDashboard = () => {
                               {/* Agent Info */}
                               <td className="py-3.5 px-4">
                                 <div className="flex items-center gap-3">
-                                  <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center shrink-0 uppercase text-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedAgentModal(req)}
+                                    className="w-9 h-9 rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold flex items-center justify-center shrink-0 uppercase text-xs cursor-pointer transition-transform hover:scale-105 shadow-xs border border-blue-200"
+                                    title={`View ${agentName}'s Profile`}
+                                  >
                                     {getInitials(agentName)}
-                                  </div>
+                                  </button>
                                   <div>
-                                    <div className="font-bold text-slate-900">{agentName}</div>
+                                    <div
+                                      onClick={() => setSelectedAgentModal(req)}
+                                      className="font-bold text-slate-900 hover:text-blue-600 cursor-pointer transition-colors"
+                                      title={`View ${agentName}'s Profile`}
+                                    >
+                                      {agentName}
+                                    </div>
                                     <div className="text-[11px] text-slate-500">{agentEmail}</div>
                                     {(agentPhone || agencyName) && (
                                       <div className="text-[10px] text-slate-400 mt-0.5">

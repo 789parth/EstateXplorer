@@ -119,6 +119,11 @@ const propertySchema = new mongoose.Schema(
       min: [0, 'Commission rate cannot be negative'],
       max: [20, 'Commission rate cannot exceed 20%'],
     },
+    commissionAmount: {
+      type: Number,
+      default: 0,
+      min: [0, 'Commission amount cannot be negative'],
+    },
     towers: [{
       towerName: { type: String, required: true },
       floorsCount: { type: Number, default: 1 },

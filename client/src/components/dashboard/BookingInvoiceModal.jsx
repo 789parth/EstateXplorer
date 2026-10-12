@@ -158,32 +158,6 @@ const BookingInvoiceModal = ({ isOpen = true, onClose, bookingId }) => {
                 </div>
               </div>
 
-              {/* Unit Specifications Table */}
-              <div>
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Booked Inventory Unit</h4>
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-xs text-left">
-                    <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
-                      <tr>
-                        <th className="py-2.5 px-3">Tower</th>
-                        <th className="py-2.5 px-3">Unit / Flat</th>
-                        <th className="py-2.5 px-3">Floor</th>
-                        <th className="py-2.5 px-3">Configuration</th>
-                        <th className="py-2.5 px-3">Carpet Area</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                      <tr>
-                        <td className="py-2.5 px-3">{invoice.unit?.tower}</td>
-                        <td className="py-2.5 px-3 font-bold">{invoice.unit?.unitNumber}</td>
-                        <td className="py-2.5 px-3">{invoice.unit?.floor}</td>
-                        <td className="py-2.5 px-3">{invoice.unit?.bhk} BHK</td>
-                        <td className="py-2.5 px-3">{invoice.unit?.carpetArea}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
 
               {/* Financial Breakup */}
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">

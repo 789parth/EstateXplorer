@@ -64,7 +64,7 @@ const userSchema = new mongoose.Schema(
     roles: {
       type: [String],
       enum: ['buyer', 'owner', 'builder', 'agent', 'admin'],
-      default: ['buyer', 'builder', 'agent', 'owner'],
+      default: ['buyer'],
     },
     avatar: {
       type: String,

@@ -64,7 +64,7 @@ async function requestPartnership(agentId, projectId, message = '') {
       throw new Error(`You are already an affiliated agent for this ${project.category === 'project' ? 'project' : 'property'}.`);
     }
     if (partnership.status === 'pending') {
-      throw new Error('Your acquisition request is already pending review by the seller.');
+      throw new Error('You have already applied.');
     }
     // If previously rejected or suspended, allow re-applying by updating to pending
     partnership.status = 'pending';
@@ -199,7 +199,7 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
       for (const other of otherPending) {
         emitToUser(String(other.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
           title: 'Agent Application Status',
-          message: `Another agent was selected for "${property.title}". You were not assigned.`,
+          message: `Your request for "${property.title}" has not been approved.`,
           partnershipId: other._id,
           status: 'rejected',
           projectId: property._id,
@@ -211,7 +211,7 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
     partnership.rejectedAt = new Date();
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;
-    partnership.rejectionReason = String(rejectionReason || 'Application was declined by the owner.').trim().slice(0, 1000);
+    partnership.rejectionReason = String(rejectionReason || `Your request for "${partnership.project?.title || 'this property'}" has not been approved.`).trim().slice(0, 1000);
   } else if (normalizedStatus === 'suspended') {
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;
@@ -224,11 +224,11 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
   // Real-time notification to Agent
   const notifTitle = normalizedStatus === 'approved' 
     ? 'Your Agent Request Has Been Accepted'
-    : 'Your Agent Request Has Been Rejected';
+    : 'Your Agent Request Has Not Been Approved';
   const itemType = partnership.project?.category === 'project' ? 'project' : 'property';
   const notifMsg = normalizedStatus === 'approved'
     ? `Congratulations! You have been assigned as the agent for "${partnership.project?.title || itemType}". The property is now public with your contact details!`
-    : `Your request for "${partnership.project?.title || itemType}" was not accepted by the seller.`;
+    : `Your request for "${partnership.project?.title || itemType}" has not been approved.`;
 
   emitToUser(String(partnership.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
     title: notifTitle,

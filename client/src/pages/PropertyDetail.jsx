@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import { useParams, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import {
   Bed,
@@ -170,6 +170,13 @@ const PropertyDetail = () => {
     }
   }, [agentParam, id]);
 
+  // Clear the inquiry modal auto-close timer on unmount to prevent stale setState
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current);
+    };
+  }, []);
+
   const [property, setProperty] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -206,6 +213,7 @@ const PropertyDetail = () => {
   const [isRequestRightsOpen, setIsRequestRightsOpen] = useState(false);
   const [agentPartnership, setAgentPartnership] = useState(null);
   const [copiedAffiliateLink, setCopiedAffiliateLink] = useState(false);
+  const autoCloseTimerRef = useRef(null);
 
   const fetchAgentPartnershipStatus = useCallback(async () => {
     if (user?.role === 'agent' && id) {
@@ -377,18 +385,18 @@ const PropertyDetail = () => {
   }, [id]);
 
 
-  const syncWishlistState = () => {
+  const syncWishlistState = useCallback(() => {
     if (user) {
       const saved = JSON.parse(localStorage.getItem('wishlist') || '[]');
       setWishlisted(saved.includes(id));
     } else {
       setWishlisted(false);
     }
-  };
+  }, [id, user]);
 
   useEffect(() => {
     syncWishlistState();
-  }, [id, user]);
+  }, [syncWishlistState]);
 
   // Real-time synchronization for cross-tab wishlist changes
   useRealtimeSync(
@@ -656,7 +664,7 @@ const PropertyDetail = () => {
       if (showToast) {
         showToast(isVisit ? 'Site visit request submitted!' : 'Inquiry sent successfully!', 'success');
       }
-      setTimeout(() => { setInquiryOpen(false); setInquirySuccess(false); }, 2500);
+      autoCloseTimerRef.current = setTimeout(() => { setInquiryOpen(false); setInquirySuccess(false); }, 2500);
     } catch (err) {
       const errMsg = err.response?.data?.message || err.message || 'Failed to submit. Please try again.';
       setInquiryError(errMsg);
@@ -862,7 +870,7 @@ const PropertyDetail = () => {
                 const isVid = isVideoUrl(img);
                 return (
                   <button
-                    key={i}
+                    key={`${img}-${i}`}
                     className={`pd-thumb ${i === safeActiveImg ? 'active' : ''} relative overflow-hidden`}
                     onClick={() => setActiveImg(i)}
                     type="button"

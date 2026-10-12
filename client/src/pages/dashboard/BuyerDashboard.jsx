@@ -775,15 +775,11 @@ const BuyerDashboard = () => {
                         </div>
                         <div className="visit-actions" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
                           <span className={`status-pill ${
-                            (visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid')
-                              ? 'token-paid'
-                              : visit.statusRaw === 'closed'
+                            (visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || visit.statusRaw === 'closed')
                               ? 'closed'
                               : 'responded'
                           }`}>
-                            {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid')
-                              ? 'Token Paid'
-                              : visit.statusRaw === 'closed'
+                            {(visit.tokenPaymentStatus === 'paid' || visit.lifecycleStage === 'token_paid' || visit.statusRaw === 'closed')
                               ? 'Completed'
                               : 'Scheduled'}
                           </span>

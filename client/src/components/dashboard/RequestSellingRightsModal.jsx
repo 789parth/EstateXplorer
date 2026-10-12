@@ -91,14 +91,6 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
             />
           </div>
 
-          <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-lg text-[0.72rem] text-blue-900 space-y-1">
-            <strong>Enterprise CP Protection Notice:</strong>
-            <p>
-              Upon approval, you will receive a unique tracking code (<code>CP-XXXXXX</code>) and dedicated affiliate link.
-              All buyer traffic referred through your link is protected by a 30-day First-Touch Attribution window with guaranteed 2-way data privacy.
-            </p>
-          </div>
-
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
             <button
               type="button"

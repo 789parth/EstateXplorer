@@ -43,6 +43,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
   const watchedPurpose = watch('purpose');
   const watchedCategory = watch('category');
   const watchedRera = watch('rera');
+  const watchedAllowAgent = watch('allowAgentAcquisition');
 
   React.useEffect(() => {
     if (!watchedRera) {
@@ -108,6 +109,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         amenitiesString: initialData.amenities ? initialData.amenities.join(', ') : '',
         isFeatured: initialData.isFeatured || false,
         allowAgentAcquisition: Boolean(initialData.allowAgentAcquisition ?? initialData.networkEnabled),
+        commissionAmount: initialData.commissionAmount || '',
       });
       setImages(initialData.images && initialData.images.length > 0 ? initialData.images : ['']);
     } else if (isOpen) {
@@ -132,6 +134,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         amenitiesString: '',
         isFeatured: false,
         allowAgentAcquisition: false,
+        commissionAmount: '',
       });
       setImages(['']);
     }
@@ -204,6 +207,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         isFeatured: data.isFeatured,
         allowAgentAcquisition: Boolean(data.allowAgentAcquisition),
         networkEnabled: Boolean(data.allowAgentAcquisition),
+        commissionAmount: data.allowAgentAcquisition && data.commissionAmount ? Number(data.commissionAmount) : 0,
       };
 
       let res;
@@ -730,21 +734,47 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
                 </div>
 
                 {/* Allow Agents to Acquire / Represent This Project / Property */}
-                <div className="flex items-start gap-2.5 mt-3 p-3 bg-emerald-50/60 rounded-lg border border-emerald-200/80">
-                  <input
-                    type="checkbox"
-                    id="allowAgentAcquisition"
-                    className="w-4 h-4 mt-0.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
-                    {...register('allowAgentAcquisition')}
-                  />
-                  <div>
-                    <label htmlFor="allowAgentAcquisition" className="text-xs sm:text-sm font-bold text-slate-900 cursor-pointer block">
-                      Allow Agents to Acquire / Represent This {watchedCategory === 'project' ? 'Project' : 'Property'}
-                    </label>
-                    <span className="text-[0.72rem] text-slate-600 block mt-0.5 leading-relaxed">
-                      When checked, registered agents can discover this {watchedCategory === 'project' ? 'project' : 'property'} in <strong>Agent Dashboard → Find Projects &amp; Properties</strong>, view details, and request to become an affiliated selling agent.
-                    </span>
+                <div className="flex flex-col gap-2.5 mt-3 p-3 bg-emerald-50/60 rounded-lg border border-emerald-200/80">
+                  <div className="flex items-start gap-2.5">
+                    <input
+                      type="checkbox"
+                      id="allowAgentAcquisition"
+                      className="w-4 h-4 mt-0.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer shrink-0"
+                      {...register('allowAgentAcquisition')}
+                    />
+                    <div>
+                      <label htmlFor="allowAgentAcquisition" className="text-xs sm:text-sm font-bold text-slate-900 cursor-pointer block">
+                        Allow Agents to Acquire / Represent This {watchedCategory === 'project' ? 'Project' : 'Property'}
+                      </label>
+                      <span className="text-[0.72rem] text-slate-600 block mt-0.5 leading-relaxed">
+                        When checked, registered agents can discover this {watchedCategory === 'project' ? 'project' : 'property'} in <strong>Agent Dashboard → Find Projects &amp; Properties</strong>, view details, and request to become an affiliated selling agent.
+                      </span>
+                    </div>
                   </div>
+
+                  {watchedAllowAgent && (
+                    <div className="pt-2.5 border-t border-emerald-200/60 mt-1">
+                      <label htmlFor="commissionAmount" className="block text-xs font-bold text-slate-800 mb-1">
+                        Commission Amount (₹)
+                      </label>
+                      <div className="relative max-w-xs">
+                        <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-xs">
+                          ₹
+                        </span>
+                        <input
+                          type="number"
+                          id="commissionAmount"
+                          placeholder="e.g. 50000"
+                          min="0"
+                          className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                          {...register('commissionAmount')}
+                        />
+                      </div>
+                      <p className="text-[0.68rem] text-slate-500 mt-1">
+                        Enter the fixed or estimated commission amount offered to the affiliated agent for this {watchedCategory === 'project' ? 'project' : 'property'}.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

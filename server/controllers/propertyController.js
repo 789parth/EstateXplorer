@@ -1547,6 +1547,10 @@ exports.payTokenAmount = async (req, res, next) => {
       return next(new AppError('Token amount has not been set for this booking yet', 400));
     }
 
+    if (inquiry.tokenPaymentStatus === 'paid' || inquiry.lifecycleStage === 'token_paid' || inquiry.bookingRef) {
+      return next(new AppError('Token payment has already been completed for this property.', 400));
+    }
+
     const { paymentMethod = 'UPI', paymentRef } = req.body;
     const generatedRef = paymentRef || `TXN-TOK-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
@@ -1668,6 +1672,10 @@ exports.createRazorpayOrder = async (req, res, next) => {
       return next(new AppError('Token amount has not been set for this booking yet', 400));
     }
 
+    if (inquiry.tokenPaymentStatus === 'paid' || inquiry.lifecycleStage === 'token_paid' || inquiry.bookingRef) {
+      return next(new AppError('Token payment has already been completed for this property.', 400));
+    }
+
     if (inquiry.tokenPaymentStatus === 'paid') {
       return next(new AppError('Token payment for this booking has already been completed', 400));
     }
@@ -1741,6 +1749,10 @@ exports.verifyRazorpayPayment = async (req, res, next) => {
 
     if (inquiryUserId !== currentUserId && inquiryEmail !== currentUserEmail) {
       return next(new AppError('Not authorized to verify payment for this inquiry', 403));
+    }
+
+    if (inquiry.tokenPaymentStatus === 'paid' || inquiry.lifecycleStage === 'token_paid' || inquiry.bookingRef) {
+      return next(new AppError('Token payment has already been completed for this property.', 400));
     }
 
     const crypto = require('crypto');
