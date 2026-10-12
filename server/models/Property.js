@@ -210,6 +210,7 @@ propertySchema.index({ purpose: 1, isActive: 1 });
 propertySchema.index({ publishingStatus: 1, isActive: 1 });
 propertySchema.index({ publishingStatus: 1, isActive: 1, createdAt: -1 });
 propertySchema.index({ publishingStatus: 1, isActive: 1, category: 1, createdAt: -1 });
+propertySchema.index({ publishingStatus: 1, isActive: 1, isFeatured: -1, createdAt: -1 });
 propertySchema.index({ assignedAgent: 1, publishingStatus: 1 });
 propertySchema.index({ publishingStatus: 1, agentAssignmentExpiresAt: 1 });
 

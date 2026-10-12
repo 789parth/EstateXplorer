@@ -33,14 +33,17 @@ app.use(compression({
 const connectDB = require('./config/db');
 
 // Ensure database connection for all environments (including Vercel serverless functions)
-app.use(async (req, res, next) => {
-  try {
-    await connectDB();
-    next();
-  } catch (err) {
-    console.error('Database connection error in request lifecycle:', err.message);
-    next(err);
+const mongoose = require('mongoose');
+app.use((req, res, next) => {
+  if (mongoose.connection.readyState === 1) {
+    return next();
   }
+  connectDB()
+    .then(() => next())
+    .catch((err) => {
+      console.error('Database connection error in request lifecycle:', err.message);
+      next(err);
+    });
 });
 
 // Health check endpoint (reports live server and db status with diagnostic details)
