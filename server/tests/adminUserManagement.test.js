@@ -57,9 +57,9 @@ async function runAdminUserManagementTests() {
   console.log('\n👥 Starting Admin User Management (Delete & Block) Tests...\n');
 
   try {
-    const connStr = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/estatexplorer';
-    await mongoose.connect(connStr);
-    console.log('MongoDB Connected for tests at:', connStr);
+    const connectDB = require('../config/db');
+    await connectDB();
+    console.log('MongoDB Connected for tests');
 
     const testTime = Date.now();
     const adminEmail = `admin_mgmt_${testTime}@estatexplorer.in`;

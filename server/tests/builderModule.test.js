@@ -24,9 +24,9 @@ async function runBuilderModuleTests() {
   console.log('\n🏗️  Starting Complete Builder Management Module Verification Tests...\n');
 
   try {
-    const connStr = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/estatexplorer';
-    await mongoose.connect(connStr);
-    console.log('MongoDB Connected for tests at:', connStr);
+    const connectDB = require('../config/db');
+    await connectDB();
+    console.log('MongoDB Connected for tests');
 
     const testTime = Date.now();
     const builderEmail = `builder_dev_${testTime}@estatexplorer.in`;

@@ -1975,20 +1975,36 @@ exports.getPropertyAgentPerformance = async (req, res, next) => {
       return next(new AppError('Not authorized to view performance for this property', 403));
     }
 
-    // Retrieve all inquiries for this property
-    const inquiries = await Inquiry.find({ property: property._id })
+    // Retrieve all inquiries for this property with selected fields and projection
+    const rawInquiries = await Inquiry.find({ property: property._id })
+      .select('name email phone visitRequested visitDate visitTime status lifecycleStage followUpStatus followUpDate followUpNotes tokenAmount tokenPaymentStatus isAttributed agent agentCode createdAt')
       .populate('user', 'name email phone')
       .sort('-createdAt')
       .lean();
 
+    const inquiries = projectLeadsForUser(rawInquiries, req.user);
+
     const totalInquiries = inquiries.length;
-    const newInquiries = inquiries.filter((i) => i.lifecycleStage === 'new').length;
-    const contactedBuyers = inquiries.filter((i) => i.lifecycleStage === 'contacted').length;
-    const scheduledVisits = inquiries.filter((i) => i.lifecycleStage === 'site_visit_scheduled' || i.visitRequested).length;
-    const completedVisits = inquiries.filter((i) => i.lifecycleStage === 'site_visit_done' || i.siteVisitCompleted).length;
-    const followUps = inquiries.filter((i) => i.followUpStatus === 'pending' || i.followUpStatus === 'completed').length;
-    const interestedBuyers = inquiries.filter((i) => i.lifecycleStage === 'interested').length;
-    const bookingsAndConversions = inquiries.filter((i) => ['token_paid', 'unit_booked', 'closed'].includes(i.lifecycleStage)).length;
+    let newInquiries = 0;
+    let contactedBuyers = 0;
+    let scheduledVisits = 0;
+    let completedVisits = 0;
+    let followUps = 0;
+    let interestedBuyers = 0;
+    let bookingsAndConversions = 0;
+
+    for (let idx = 0; idx < totalInquiries; idx++) {
+      const item = inquiries[idx];
+      const stage = item.lifecycleStage;
+      if (stage === 'new') newInquiries++;
+      else if (stage === 'contacted') contactedBuyers++;
+      else if (stage === 'interested') interestedBuyers++;
+      else if (['token_paid', 'unit_booked', 'closed'].includes(stage)) bookingsAndConversions++;
+
+      if (stage === 'site_visit_scheduled' || item.visitRequested) scheduledVisits++;
+      if (stage === 'site_visit_done' || item.siteVisitCompleted) completedVisits++;
+      if (item.followUpStatus === 'pending' || item.followUpStatus === 'completed') followUps++;
+    }
 
     res.status(200).json({
       success: true,
