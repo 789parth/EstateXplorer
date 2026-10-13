@@ -197,19 +197,19 @@ exports.getProperties = async (req, res, next) => {
   try {
     let query;
 
-    // Public website strictly hides properties open for agent assignment or in inventory (Spec §1, §11)
-    const reqQuery = {
-      ...req.query,
-      isActive: true,
-      publishingStatus: { $in: ['published_direct', 'published_with_agent'] },
-    };
+    const reqQuery = { ...req.query };
     const removeFields = ['select', 'sort', 'page', 'limit'];
     removeFields.forEach((param) => delete reqQuery[param]);
 
     let queryStr = JSON.stringify(reqQuery);
     queryStr = queryStr.replace(/\b(gt|gte|lt|lte|in)\b/g, (match) => `$${match}`);
+    const filterQuery = JSON.parse(queryStr);
 
-    query = Property.find(JSON.parse(queryStr))
+    // Public website strictly hides properties open for agent assignment or in inventory (Spec §1, §11)
+    filterQuery.isActive = true;
+    filterQuery.publishingStatus = { $in: ['published_direct', 'published_with_agent'] };
+
+    query = Property.find(filterQuery)
       .populate({
         path: 'builder',
         select: 'name companyName role reraNumber',
@@ -232,9 +232,8 @@ exports.getProperties = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     // Parallelize count + data fetch: saves one full DB round-trip
-    const parsedQuery = JSON.parse(queryStr);
     const [total, properties] = await Promise.all([
-      Property.countDocuments(parsedQuery),
+      Property.countDocuments(filterQuery),
       query.skip(skip).limit(limit).lean(),
     ]);
 

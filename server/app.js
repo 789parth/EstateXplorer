@@ -103,7 +103,6 @@ const LeadAuditLog = require('./models/LeadAuditLog');
 // Sync indexes and migrate uploads once after the DB connection is established.
 // Using the mongoose 'connected' event avoids a second connectDB() call from app.js
 // (server.js already calls connectDB() during startup).
-const mongoose = require('mongoose');
 const OTP = require('./models/OTP');
 const runStartupTasks = () => {
   Property.syncIndexes().catch(() => {});
