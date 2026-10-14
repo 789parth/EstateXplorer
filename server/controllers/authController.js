@@ -4,6 +4,7 @@ const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const OTP = require('../models/OTP');
 const RoleRequest = require('../models/RoleRequest');
+const Partnership = require('../models/Partnership');
 const AppError = require('../utils/AppError');
 const { sendTokenResponse, generateAccessToken } = require('../utils/generateToken');
 const sendEmail = require('../utils/sendEmail');
@@ -1392,8 +1393,28 @@ exports.switchRole = async (req, res, next) => {
 // @access  Private
 exports.deleteAccount = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user.id || req.user._id;
     const userEmail = req.user.email;
+
+    // Phase 6 Requirement: Prevent Account Deletion While Partnerships Are Active
+    // If agent tries to delete their account with active partnerships, block deletion
+    const isAgent = req.user.role === 'agent' || (Array.isArray(req.user.roles) && req.user.roles.includes('agent'));
+    if (isAgent) {
+      const activePartnershipsCount = await Partnership.countDocuments({
+        agent: userId,
+        status: { $in: ['approved', 'accepted'] },
+      });
+
+      if (activePartnershipsCount > 0) {
+        return res.status(400).json({
+          success: false,
+          hasActivePartnerships: true,
+          count: activePartnershipsCount,
+          message:
+            'You cannot delete your account while you have active partnerships with builder projects or properties. Please leave all projects and properties where you have active partnerships before permanently deleting your account.',
+        });
+      }
+    }
 
     // Cascade delete user and all associated data by ID and email
     await cascadeDeleteAllUserData({ userId, email: userEmail });

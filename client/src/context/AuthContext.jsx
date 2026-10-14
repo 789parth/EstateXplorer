@@ -387,37 +387,34 @@ export const AuthProvider = ({ children }) => {
   };
 
   const handleDeleteAccount = async () => {
+    const res = await deleteAccountApi();
+    
+    setUser(null);
+    setAccessToken(null);
+    setAccessTokenInMemory(null);
+    
+    // Clear all local client state related to user (wishlist, inquiries, recently viewed, role state)
     try {
-      await deleteAccountApi();
-    } catch (err) {
-      console.error('Delete account error:', err);
-    } finally {
-      setUser(null);
-      setAccessToken(null);
-      setAccessTokenInMemory(null);
-      
-      // Clear all local client state related to user (wishlist, inquiries, recently viewed, role state)
-      try {
-        if (typeof window !== 'undefined') {
-          if (window.localStorage) {
-            window.localStorage.removeItem('wishlist');
-            window.localStorage.removeItem('myInquiries');
-            window.localStorage.removeItem('recentlyViewed');
-            window.localStorage.removeItem('booked_visits');
-            window.localStorage.removeItem('activeRole');
-          }
-          if (window.sessionStorage) {
-            window.sessionStorage.clear();
-          }
+      if (typeof window !== 'undefined') {
+        if (window.localStorage) {
+          window.localStorage.removeItem('wishlist');
+          window.localStorage.removeItem('myInquiries');
+          window.localStorage.removeItem('recentlyViewed');
+          window.localStorage.removeItem('booked_visits');
+          window.localStorage.removeItem('activeRole');
         }
-      } catch (storageErr) {
-        console.warn('Error clearing local storage upon account deletion:', storageErr);
+        if (window.sessionStorage) {
+          window.sessionStorage.clear();
+        }
       }
-
-      showToast('Your account and all associated data have been permanently deleted.', 'info');
-      // Strictly navigate to Home Page
-      window.location.replace('/');
+    } catch (storageErr) {
+      console.warn('Error clearing local storage upon account deletion:', storageErr);
     }
+
+    showToast('Your account and all associated data have been permanently deleted.', 'info');
+    // Strictly navigate to Home Page
+    window.location.replace('/');
+    return res;
   };
 
   const contextValue = useMemo(

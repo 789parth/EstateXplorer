@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Briefcase, Users, Eye, Award, Phone, Mail, MapPin, Trash2, CheckCircle2, ArrowLeft, Calendar, Compass } from 'lucide-react';
+import { Briefcase, Users, Eye, Award, Phone, Mail, MapPin, Trash2, CheckCircle2, ArrowLeft, Calendar, Compass, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { updateProfileApi } from '../../services/authService';
 import { getMyProperties, getMyInquiries } from '../../services/propertyService';
@@ -16,6 +16,8 @@ const AgentProfile = () => {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [activePartnershipsBlockedModal, setActivePartnershipsBlockedModal] = useState(false);
+  const [activePartnershipsCount, setActivePartnershipsCount] = useState(0);
 
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -153,9 +155,29 @@ const AgentProfile = () => {
   };
 
   const handleDeleteAccount = async () => {
-    if (window.confirm('Are you sure you want to permanently delete your agent account and all listings? This action cannot be undone.')) {
-      await deleteAccount();
-      navigate('/');
+    try {
+      // Check active partnerships first
+      const partnershipsRes = await getMyPartnerships();
+      const activeList = Array.isArray(partnershipsRes?.data)
+        ? partnershipsRes.data.filter((p) => p.status === 'approved' || p.status === 'accepted')
+        : [];
+
+      if (activeList.length > 0) {
+        setActivePartnershipsCount(activeList.length);
+        setActivePartnershipsBlockedModal(true);
+        return;
+      }
+
+      if (window.confirm('Are you sure you want to permanently delete your agent account and all listings? This action cannot be undone.')) {
+        await deleteAccount();
+      }
+    } catch (err) {
+      if (err.response?.data?.hasActivePartnerships) {
+        setActivePartnershipsCount(err.response.data.count || 1);
+        setActivePartnershipsBlockedModal(true);
+      } else {
+        showToast(err.response?.data?.message || err.message || 'Failed to delete account', 'error');
+      }
     }
   };
 
@@ -487,6 +509,61 @@ const AgentProfile = () => {
           </div>
         </div>
       </div>
+
+      {/* Modal: Prevent Account Deletion While Partnerships Are Active (Phase 6) */}
+      {activePartnershipsBlockedModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
+                <AlertTriangle size={20} className="text-rose-600" />
+                <span>Cannot Delete Account Yet</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePartnershipsBlockedModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 bg-rose-50/70 p-4 rounded-xl border border-rose-200/80 text-xs text-rose-950">
+              <p className="font-bold text-sm mb-1 text-rose-900">
+                Active Partnerships Detected ({activePartnershipsCount})
+              </p>
+              <p className="text-xs text-rose-800 leading-relaxed">
+                You currently have active partnerships with builder projects or properties. You cannot delete your account while you are actively representing any listings.
+              </p>
+              <p className="text-xs text-rose-800 font-semibold mt-2">
+                Please leave all projects and properties where you have active partnerships before permanently deleting your account.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setActivePartnershipsBlockedModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePartnershipsBlockedModal(false);
+                  navigate('/dashboard/agent?tab=affiliations');
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <Briefcase size={14} />
+                <span>Go to My Affiliations</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

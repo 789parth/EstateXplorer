@@ -110,7 +110,21 @@ exports.cascadeDeleteAllUserData = async ({ userId, email }) => {
     ],
   });
 
-  // 10. Delete Properties created by the user
+  // 10. Unassign user from any property where they were the assigned agent
+  await Property.updateMany(
+    { assignedAgent: uid },
+    {
+      $set: {
+        assignedAgent: null,
+        agentAssignedAt: null,
+        publishingStatus: 'in_inventory',
+        allowAgentAcquisition: false,
+        networkEnabled: false,
+      },
+    }
+  );
+
+  // 11. Delete Properties created/owned by the user
   if (propertyIds.length) {
     await Property.deleteMany({ _id: { $in: propertyIds } });
   }
