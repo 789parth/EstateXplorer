@@ -321,9 +321,20 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
             </p>
           </div>
         ) : (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium flex items-center gap-2">
-            <AlertTriangle size={14} className="text-red-500 shrink-0" />
-            <span>{serverError}</span>
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-600 font-medium flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-red-500 shrink-0" />
+              <span>{serverError}</span>
+            </div>
+            {onSwitchToLogin && /already exists|already registered|log in|sign in/i.test(serverError) && (
+              <button
+                type="button"
+                onClick={onSwitchToLogin}
+                className="font-bold underline text-blue-700 hover:text-blue-900 cursor-pointer shrink-0 ml-2"
+              >
+                Sign In
+              </button>
+            )}
           </div>
         )
       )}
@@ -341,6 +352,13 @@ const RegisterForm = ({ onSuccess, onSwitchToLogin, initialEmail = '' }) => {
         role={selectedRole}
         label="Continue with Google"
         intent="register"
+        onAlreadyRegistered={(email) => {
+          setServerError(
+            email
+              ? `An account with email "${email}" already exists. Please sign in instead.`
+              : 'An account with this Google email already exists. Please sign in instead.'
+          );
+        }}
       />
 
       {/* Divider */}

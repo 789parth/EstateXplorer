@@ -288,6 +288,14 @@ export const AuthProvider = ({ children }) => {
           message: resData.message || 'Account does not exist. Please register first.',
         };
       }
+      if (resData?.alreadyRegistered) {
+        return {
+          success: false,
+          alreadyRegistered: true,
+          email: resData.email,
+          message: resData.message || 'An account with this email address already exists. Please log in.',
+        };
+      }
       const serverMsg = resData?.message || '';
       const msg = serverMsg || error.message || 'Google sign-in failed. Please try again.';
       showToast(msg, 'error');

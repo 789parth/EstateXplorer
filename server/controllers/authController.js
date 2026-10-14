@@ -1156,6 +1156,16 @@ exports.googleAuth = async (req, res, next) => {
         });
       }
 
+      // Check User Registration: Before registering a new user, check whether the user already exists in the database.
+      if (intent === 'register') {
+        return res.status(400).json({
+          success: false,
+          alreadyRegistered: true,
+          email: normalizedEmail,
+          message: 'An account with this email address already exists. Please log in.',
+        });
+      }
+
       // Standard role handling for Google Sign-in:
       if (chosenRole && ['buyer', 'builder', 'agent', 'owner'].includes(chosenRole)) {
         if (!user.roles || !Array.isArray(user.roles) || user.roles.length === 0) {
@@ -1208,9 +1218,19 @@ exports.googleAuth = async (req, res, next) => {
         return next(new AppError('Please enter a valid 10-digit mobile number.', 400));
       }
 
-      const phoneExists = await User.findOne({ phone: cleanPhone });
+      const phoneExists = await User.findOne({ phone: new RegExp(`${cleanPhone}$`) }).select('_id').lean();
       if (phoneExists) {
-        return next(new AppError('This mobile number is already registered. Please use a different mobile number.', 400));
+        return next(new AppError('This mobile number is already registered. Please log in or use a different mobile number.', 400));
+      }
+
+      const emailExists = await User.findOne({ email: normalizedEmail }).select('_id').lean();
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          alreadyRegistered: true,
+          email: normalizedEmail,
+          message: 'An account with this email address already exists. Please log in.',
+        });
       }
 
       const activeRole = chosenRole && ['buyer', 'owner', 'builder', 'agent'].includes(chosenRole)

@@ -48,6 +48,7 @@ const GoogleAuthButton = ({
   label = 'Continue with Google',
   intent = 'login',
   onNotRegistered,
+  onAlreadyRegistered,
 }) => {
   const { googleLogin, showToast } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -168,6 +169,15 @@ const GoogleAuthButton = ({
                 return;
               }
 
+              if (result?.alreadyRegistered) {
+                if (onAlreadyRegistered) {
+                  onAlreadyRegistered(result.email || userInfo.email);
+                } else {
+                  showToast(result.message || 'An account with this email already exists. Please log in.', 'error');
+                }
+                return;
+              }
+
               if (result?.success && onSuccess) {
                 onSuccess();
               }
@@ -187,6 +197,14 @@ const GoogleAuthButton = ({
               }
               if (resData?.notRegistered && onNotRegistered) {
                 onNotRegistered(resData.email || '');
+                return;
+              }
+              if (resData?.alreadyRegistered) {
+                if (onAlreadyRegistered) {
+                  onAlreadyRegistered(resData.email || '');
+                } else {
+                  showToast(resData.message || 'An account with this email already exists. Please log in.', 'error');
+                }
                 return;
               }
               const msg = resData?.message || authErr.message || 'Google sign-in failed.';
@@ -223,6 +241,15 @@ const GoogleAuthButton = ({
               }
               if (result?.notRegistered && onNotRegistered) {
                 onNotRegistered(result.email || '');
+                setLoading(false);
+                return;
+              }
+              if (result?.alreadyRegistered) {
+                if (onAlreadyRegistered) {
+                  onAlreadyRegistered(result.email || '');
+                } else {
+                  showToast(result.message || 'An account with this email already exists. Please log in.', 'error');
+                }
                 setLoading(false);
                 return;
               }
