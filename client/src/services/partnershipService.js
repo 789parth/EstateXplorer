@@ -37,3 +37,8 @@ export const bulkApprovePartnerships = async (partnershipIds) => {
   const response = await api.post('/partnerships/bulk-approve', { partnershipIds });
   return response.data;
 };
+
+export const leavePartnershipApi = async (partnershipId, reason = '') => {
+  const response = await api.post(`/partnerships/${partnershipId}/leave`, { reason });
+  return response.data;
+};

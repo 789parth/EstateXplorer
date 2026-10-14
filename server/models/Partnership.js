@@ -22,9 +22,18 @@ const partnershipSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected', 'suspended'],
+      enum: ['pending', 'approved', 'rejected', 'suspended', 'left', 'terminated'],
       default: 'pending',
       index: true,
+    },
+    leftAt: {
+      type: Date,
+      default: null,
+    },
+    leaveReason: {
+      type: String,
+      trim: true,
+      default: '',
     },
     agentCode: {
       type: String,

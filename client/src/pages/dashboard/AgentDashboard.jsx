@@ -46,6 +46,7 @@ import {
   discoverProjects,
   getMyPartnerships,
   requestPartnership,
+  leavePartnershipApi,
 } from '../../services/partnershipService';
 import { formatPhoneNumber, formatPrice } from '../../utils/formatters';
 import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
@@ -165,6 +166,11 @@ const AgentDashboard = () => {
   const [requestModalProject, setRequestModalProject] = useState(null);
   const [statusNotificationModal, setStatusNotificationModal] = useState(null);
   const [copiedLinkMap, setCopiedLinkMap] = useState({});
+
+  // Leave Partnership Modal State (Phase 5)
+  const [leaveModalPartnership, setLeaveModalPartnership] = useState(null);
+  const [leaveReasonText, setLeaveReasonText] = useState('');
+  const [leavingPartnership, setLeavingPartnership] = useState(false);
 
   const fetchProperties = useCallback(async (isBackground = false) => {
     try {
@@ -312,6 +318,37 @@ const AgentDashboard = () => {
       const pId = p.project?._id || p.project;
       return String(pId) === String(projectId);
     });
+  };
+
+  // Agent voluntarily leaves partnership (Phase 5)
+  const handleConfirmLeavePartnership = async (e) => {
+    if (e) e.preventDefault();
+    if (!leaveModalPartnership) return;
+
+    if (!leaveReasonText.trim()) {
+      showToast('Please explain why you want to leave this project/property.', 'error');
+      return;
+    }
+
+    setLeavingPartnership(true);
+    try {
+      const res = await leavePartnershipApi(leaveModalPartnership._id, leaveReasonText.trim());
+      if (res.success) {
+        showToast(res.message || 'Successfully left this listing. The builder has been notified.', 'success');
+        setLeaveModalPartnership(null);
+        setLeaveReasonText('');
+        await fetchMyPartnerships();
+        await fetchDiscoverProjects(false);
+        broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, {
+          action: 'left',
+          partnershipId: leaveModalPartnership._id,
+        });
+      }
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to leave partnership', 'error');
+    } finally {
+      setLeavingPartnership(false);
+    }
   };
 
 
@@ -2317,6 +2354,22 @@ const AgentDashboard = () => {
                                     30-Day First-Touch Lock
                                   </span>
                                 </div>
+
+                                {/* Leave Project / Property Button (Phase 5) */}
+                                <div className="pt-2 border-t border-slate-200/70 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setLeaveModalPartnership({ ...item, project, isProject });
+                                      setLeaveReasonText('');
+                                    }}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-all cursor-pointer inline-flex items-center gap-1"
+                                    title={`Leave this ${isProject ? 'project' : 'property'}`}
+                                  >
+                                    <X size={12} />
+                                    <span>Leave {isProject ? 'Project' : 'Property'}</span>
+                                  </button>
+                                </div>
                               </div>
                             ) : isPending ? (
                               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs space-y-1">
@@ -2738,6 +2791,88 @@ const AgentDashboard = () => {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Leave Project / Property (Phase 5) */}
+      {leaveModalPartnership && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
+                <AlertCircle size={18} />
+                <span>Leave {leaveModalPartnership.isProject ? 'Project' : 'Property'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeaveModalPartnership(null);
+                  setLeaveReasonText('');
+                }}
+                disabled={leavingPartnership}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 bg-rose-50/70 p-3 rounded-xl border border-rose-200/80 text-xs text-rose-950">
+              <p className="font-bold truncate mb-1">
+                {leaveModalPartnership.project?.title || leaveModalPartnership.title || 'Selected Listing'}
+              </p>
+              <p className="text-[11px] text-rose-800 leading-relaxed">
+                Relinquishing representation releases your active selling rights and deactivates your client referral link for this listing. The developer/owner will be notified with your reason.
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmLeavePartnership} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Reason for Leaving (Sent to Builder) <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows="3"
+                  value={leaveReasonText}
+                  onChange={(e) => setLeaveReasonText(e.target.value)}
+                  placeholder="e.g., We are realigning our portfolio focus to commercial projects in North Gujarat."
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-rose-500"
+                  required
+                  autoFocus
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Please provide a clear explanation to the builder explaining why you want to leave.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLeaveModalPartnership(null);
+                    setLeaveReasonText('');
+                  }}
+                  disabled={leavingPartnership}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={leavingPartnership || !leaveReasonText.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  {leavingPartnership ? (
+                    <span>Leaving...</span>
+                  ) : (
+                    <>
+                      <X size={13} />
+                      <span>Confirm &amp; Leave Listing</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -354,6 +354,101 @@ async function getBuilderPartnerships(builderId, projectId = null) {
     .lean();
 }
 
+/**
+ * Agent voluntarily leaves a partnership with a builder
+ * Releases agent assignment from property and notifies builder
+ */
+async function leavePartnership(agentId, partnershipId, reasonMessage = '') {
+  const partnership = await Partnership.findById(partnershipId)
+    .populate('project', 'title category builder assignedAgent publishingStatus')
+    .populate('agent', 'name email phone')
+    .populate('builder', 'name email companyName');
+
+  if (!partnership) {
+    throw new Error('Partnership record not found.');
+  }
+
+  // Verify ownership: requesting agent must be the partner
+  if (String(partnership.agent?._id || partnership.agent) !== String(agentId)) {
+    throw new Error('You are not authorized to leave this partnership.');
+  }
+
+  // Ensure partnership is currently active/approved
+  if (partnership.status !== 'approved') {
+    throw new Error('You can only leave active and approved partnerships.');
+  }
+
+  const now = new Date();
+  partnership.status = 'left';
+  partnership.leftAt = now;
+  partnership.leaveReason = reasonMessage?.trim() || 'Agent decided to leave listing.';
+  partnership.affiliateUrl = '';
+  await partnership.save();
+
+  // If the property has this agent assigned, unassign and return to in_inventory so builder can reassign or re-open
+  const property = await Property.findById(partnership.project?._id || partnership.project);
+  if (property) {
+    const isCurrentlyAssigned = String(property.assignedAgent) === String(agentId);
+    if (isCurrentlyAssigned) {
+      property.assignedAgent = null;
+      property.agentAssignedAt = null;
+      property.publishingStatus = 'in_inventory';
+      property.allowAgentAcquisition = false;
+      property.networkEnabled = false;
+      await property.save();
+    }
+  }
+
+  // Notify the Builder/Owner via real-time socket
+  const sellerId = partnership.builder?._id ? String(partnership.builder._id) : String(partnership.builder);
+  const agentName = partnership.agent?.name || 'Agent';
+  const propertyTitle = partnership.project?.title || 'Listing';
+
+  emitToUser(sellerId, SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
+    title: 'Agent Left Listing',
+    message: `${agentName} has left "${propertyTitle}". Reason: ${partnership.leaveReason}`,
+    partnershipId: partnership._id,
+    status: 'left',
+    projectId: partnership.project?._id,
+    projectTitle: propertyTitle,
+    agentName,
+    reason: partnership.leaveReason,
+  });
+
+  // Also send Email notification to Builder/Owner if email is configured
+  if (partnership.builder?.email) {
+    const emailSubject = `Agent Left Listing — ${propertyTitle}`;
+    const emailMessage = `Dear ${partnership.builder.companyName || partnership.builder.name || 'Developer/Owner'},\n\nAgent ${agentName} has voluntarily relinquished their representation for "${propertyTitle}".\n\nReason provided by Agent:\n"${partnership.leaveReason}"\n\nThe property status has been reset to inventory. You may re-open it for agent assignment anytime from your builder dashboard.\n\nBest regards,\nEstateXplorer Team\nsupport@estatexplorer.in`;
+
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 600px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #0f172a; margin-top: 0;">Estate<span style="color: #2563eb;">Xplorer</span></h2>
+        <h3 style="color: #334155; font-size: 16px;">Agent Relinquished Representation</h3>
+        <p>Dear <strong>${partnership.builder.companyName || partnership.builder.name || 'Developer/Owner'}</strong>,</p>
+        <p>Agent <strong>${agentName}</strong> has voluntarily left their active representation for <strong>${propertyTitle}</strong>.</p>
+        <div style="background-color: #fef2f2; border-left: 4px solid #ef4444; padding: 14px 16px; border-radius: 6px; margin: 20px 0;">
+          <p style="margin: 0; color: #991b1b; font-size: 13px; font-weight: bold;">Reason provided by Agent:</p>
+          <p style="margin: 6px 0 0; color: #7f1d1d; font-size: 14px; font-style: italic;">&ldquo;${partnership.leaveReason}&rdquo;</p>
+        </div>
+        <p style="font-size: 13px; color: #475569;">
+          The listing has been moved to your inventory. You can re-open it for agent assignment or publish directly anytime from your dashboard.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 24px 0;">
+        <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">&copy; 2026 EstateXplorer. All rights reserved.</p>
+      </div>
+    `;
+
+    sendEmail({
+      email: partnership.builder.email,
+      subject: emailSubject,
+      message: emailMessage,
+      html: emailHtml,
+    }).catch((mailErr) => console.error(`[Agent Left Email Error] ${partnership.builder.email}:`, mailErr.message));
+  }
+
+  return partnership;
+}
+
 module.exports = {
   generateAgentCode,
   requestPartnership,
@@ -361,4 +456,5 @@ module.exports = {
   bulkApprovePartnerships,
   getAgentPartnerships,
   getBuilderPartnerships,
+  leavePartnership,
 };

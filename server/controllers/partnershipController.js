@@ -212,3 +212,27 @@ exports.getProjectPartnership = async (req, res) => {
   }
 };
 
+/**
+ * @desc   Agent voluntarily leaves a project or property partnership
+ * @route  POST /api/partnerships/:id/leave
+ * @access Private (Agent only)
+ */
+exports.leavePartnership = async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const partnership = await partnershipService.leavePartnership(
+      req.user._id,
+      req.params.id,
+      reason
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'You have successfully left this project/property. The builder has been notified.',
+      data: partnership,
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
