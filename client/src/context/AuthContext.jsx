@@ -242,6 +242,19 @@ export const AuthProvider = ({ children }) => {
   const handleGoogleLogin = async (payload, role, intent = 'login') => {
     try {
       const res = await googleAuthApi(payload, role, intent);
+      if (res.requiresPhone) {
+        return {
+          success: false,
+          requiresPhone: true,
+          googleUser: {
+            email: res.email,
+            name: res.name,
+            picture: res.picture,
+            googleId: res.googleId,
+          },
+          message: res.message,
+        };
+      }
       if (res.success) {
         setUser(res.data.user);
         setAccessToken(res.data.accessToken);
@@ -250,9 +263,23 @@ export const AuthProvider = ({ children }) => {
         showToast(`Welcome, ${res.data.user.name}!`, 'success');
         return { success: true };
       }
+      return { success: false, message: res.message };
     } catch (error) {
       if (error?._isSessionExpiry) return { success: false };
       const resData = error.response?.data;
+      if (resData?.requiresPhone) {
+        return {
+          success: false,
+          requiresPhone: true,
+          googleUser: {
+            email: resData.email,
+            name: resData.name,
+            picture: resData.picture,
+            googleId: resData.googleId,
+          },
+          message: resData.message,
+        };
+      }
       if (resData?.notRegistered) {
         return {
           success: false,

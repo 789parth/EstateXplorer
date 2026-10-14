@@ -176,6 +176,13 @@ exports.createProperty = async (req, res, next) => {
       if (req.body.location.address) req.body.location.address = req.body.location.address.trim();
     }
 
+    req.body.isFeatured = Boolean(req.body.isFeatured);
+    if (!req.body.allowAgentAcquisition) {
+      req.body.publishingStatus = 'published_direct';
+    } else {
+      req.body.publishingStatus = 'open_for_agent';
+    }
+
     const property = await Property.create(req.body);
 
     // Invalidate properties cache immediately
@@ -494,6 +501,19 @@ exports.updateProperty = async (req, res, next) => {
       if (req.body.location.city) req.body.location.city = normalizeTitleCase(req.body.location.city);
       if (req.body.location.state) req.body.location.state = normalizeTitleCase(req.body.location.state);
       if (req.body.location.address) req.body.location.address = req.body.location.address.trim();
+    }
+
+    if (req.body.isFeatured !== undefined) {
+      req.body.isFeatured = Boolean(req.body.isFeatured);
+    }
+
+    if (req.body.allowAgentAcquisition !== undefined) {
+      req.body.allowAgentAcquisition = Boolean(req.body.allowAgentAcquisition);
+      if (!req.body.allowAgentAcquisition && !property.assignedAgent) {
+        req.body.publishingStatus = 'published_direct';
+      } else if (req.body.allowAgentAcquisition && !property.assignedAgent) {
+        req.body.publishingStatus = 'open_for_agent';
+      }
     }
 
     property = await Property.findByIdAndUpdate(propertyId, req.body, {
@@ -1120,10 +1140,20 @@ exports.updateInquiryStatus = async (req, res, next) => {
     let isPropertyHolder =
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
       (inquiryAgentId && inquiryAgentId === currentUserId);
-    if (!inquiryBuilderId && !inquiryAgentId && inquiry.property) {
-      const linkedProperty = await Property.findById(inquiry.property).select('builder user').lean();
-      const linkedOwnerId = linkedProperty?.builder || linkedProperty?.user;
-      isPropertyHolder = !!linkedOwnerId && String(linkedOwnerId) === currentUserId;
+
+    if (!isPropertyHolder && inquiry.property) {
+      const propId = inquiry.property?._id || inquiry.property;
+      const linkedProperty = await Property.findById(propId).select('builder user assignedAgent').lean();
+      if (linkedProperty) {
+        const propBuilder = (linkedProperty.builder || linkedProperty.user)?.toString();
+        const propAgent = linkedProperty.assignedAgent?.toString();
+        if ((propBuilder && propBuilder === currentUserId) || (propAgent && propAgent === currentUserId)) {
+          isPropertyHolder = true;
+          // Synchronize missing reference on inquiry
+          if (!inquiry.builder && propBuilder) inquiry.builder = propBuilder;
+          if (!inquiry.agent && propAgent) inquiry.agent = propAgent;
+        }
+      }
     }
 
     // Admin users who are not the property holder must NOT answer property inquiries
@@ -1184,6 +1214,16 @@ exports.updateInquiryStatus = async (req, res, next) => {
       inquiry.tokenAmount = Number(req.body.tokenAmount) || 0;
       if (inquiry.tokenAmount > 0) {
         inquiry.bookingEnabled = true;
+        if (!inquiry.tokenPaymentStatus || inquiry.tokenPaymentStatus === 'unpaid') {
+          inquiry.tokenPaymentStatus = 'pending';
+        }
+        if (['new', 'contacted', 'interested', 'site_visit_scheduled'].includes(inquiry.lifecycleStage)) {
+          inquiry.lifecycleStage = 'site_visit_done';
+          inquiry.siteVisitCompleted = true;
+          if (!inquiry.siteVisitCompletedAt) {
+            inquiry.siteVisitCompletedAt = new Date();
+          }
+        }
       }
     }
     if (req.body.bookingEnabled !== undefined) {
@@ -1399,13 +1439,23 @@ exports.replyToPropertyInquiry = async (req, res, next) => {
       return next(new AppError('Reply could not be delivered. The inquiry remains available for retry.', 502));
     }
 
-    // Automatically delete inquiry from database after sending reply
-    await Inquiry.findByIdAndDelete(inquiry._id);
+    // Mark inquiry as answered and contacted (do not delete so agents can track history)
+    inquiry.isAnswered = true;
+    inquiry.repliedAt = new Date();
+    inquiry.lastReply = replyMessage.trim();
+    inquiry.repliedBy = req.user._id || req.user.id;
+    if (inquiry.status === 'new') {
+      inquiry.status = 'contacted';
+    }
+    if (inquiry.lifecycleStage === 'new') {
+      inquiry.lifecycleStage = 'contacted';
+    }
+    await inquiry.save();
 
     res.status(200).json({
       success: true,
-      message: `Reply email sent to ${inquiry.email} and inquiry successfully resolved and deleted.`,
-      data: { id: inquiry._id, deleted: true },
+      message: `Reply email successfully sent to ${inquiry.email}. Inquiry marked as answered.`,
+      data: inquiry,
     });
   } catch (error) {
     next(error);

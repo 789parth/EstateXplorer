@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const Partnership = require('../models/Partnership');
 const Property = require('../models/Property');
 const User = require('../models/User');
+const sendEmail = require('../utils/sendEmail');
 const { emitToUser, SOCKET_EVENTS } = require('./socketManager');
 
 /**
@@ -181,7 +182,7 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
       project: property._id,
       _id: { $ne: partnership._id },
       status: 'pending',
-    });
+    }).populate('agent', 'name email');
 
     if (otherPending.length > 0) {
       await Partnership.updateMany(
@@ -195,9 +196,10 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
         }
       );
 
-      // Notify the unselected applicants
+      // Notify the unselected applicants via Socket.io and Email
       for (const other of otherPending) {
-        emitToUser(String(other.agent), SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
+        const otherAgentId = other.agent?._id ? String(other.agent._id) : String(other.agent);
+        emitToUser(otherAgentId, SOCKET_EVENTS.PARTNERSHIP_STATUS_CHANGED, {
           title: 'Agent Application Status',
           message: `Your request for "${property.title}" has not been approved.`,
           partnershipId: other._id,
@@ -205,13 +207,70 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
           projectId: property._id,
           projectTitle: property.title,
         });
+
+        // Requirement 7: Automatically send rejection email with project or property name
+        if (other.agent?.email) {
+          const emailSubject = `Agent Application Status — ${property.title}`;
+          const emailMessage = `Dear ${other.agent.name || 'Agent Partner'},\n\nThank you for applying to represent "${property.title}" on EstateXplorer.\n\nWe would like to inform you that you have not been selected for "${property.title}" as another agent has been assigned to this listing.\n\nYou are welcome to explore and apply for other active projects and properties on EstateXplorer.\n\nBest regards,\nEstateXplorer Team\nsupport@estatexplorer.in`;
+          
+          const emailHtml = `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 600px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #0f172a; margin-top: 0;">Estate<span style="color: #2563eb;">Xplorer</span></h2>
+              <h3 style="color: #334155; font-size: 16px;">Agent Application Status Update</h3>
+              <p>Dear <strong>${other.agent.name || 'Agent Partner'}</strong>,</p>
+              <p>Thank you for submitting your application to represent <strong>${property.title}</strong> on EstateXplorer.</p>
+              <div style="background-color: #f8fafc; border-left: 4px solid #64748b; padding: 14px 16px; border-radius: 6px; margin: 20px 0;">
+                <p style="margin: 0; color: #475569; font-size: 14px;">
+                  We would like to inform you that you have not been selected for <strong>"${property.title}"</strong> as another agent has been approved for this listing.
+                </p>
+              </div>
+              <p style="font-size: 13px; color: #475569;">
+                You are encouraged to explore our wide range of active developer projects and exclusive properties to apply for new selling rights.
+              </p>
+              <div style="text-align: center; margin: 28px 0;">
+                <a href="${process.env.CLIENT_URL || 'http://localhost:5173'}/dashboard/agent" style="background: #2563eb; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 13px; display: inline-block;">Explore Other Projects</a>
+              </div>
+              <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 24px 0;">
+              <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">&copy; 2026 EstateXplorer. All rights reserved.</p>
+            </div>
+          `;
+
+          sendEmail({
+            email: other.agent.email,
+            subject: emailSubject,
+            message: emailMessage,
+            html: emailHtml,
+          }).catch((mailErr) => console.error(`[Agent Rejection Email Error] ${other.agent.email}:`, mailErr.message));
+        }
       }
     }
   } else if (normalizedStatus === 'rejected') {
     partnership.rejectedAt = new Date();
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;
-    partnership.rejectionReason = String(rejectionReason || `Your request for "${partnership.project?.title || 'this property'}" has not been approved.`).trim().slice(0, 1000);
+    const projectTitle = partnership.project?.title || property?.title || 'this listing';
+    partnership.rejectionReason = String(rejectionReason || `Your request for "${projectTitle}" has not been approved.`).trim().slice(0, 1000);
+
+    // Send individual rejection email
+    const agentUser = await User.findById(partnership.agent).select('name email');
+    if (agentUser?.email) {
+      sendEmail({
+        email: agentUser.email,
+        subject: `Agent Application Status — ${projectTitle}`,
+        message: `Dear ${agentUser.name || 'Agent Partner'},\n\nWe would like to inform you that your request for "${projectTitle}" has not been approved.\n\nBest regards,\nEstateXplorer Team\nsupport@estatexplorer.in`,
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 600px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #0f172a; margin-top: 0;">Estate<span style="color: #2563eb;">Xplorer</span></h2>
+            <h3 style="color: #334155; font-size: 16px;">Agent Application Status Update</h3>
+            <p>Dear <strong>${agentUser.name || 'Agent Partner'}</strong>,</p>
+            <p>We are writing to inform you that your request to represent <strong>${projectTitle}</strong> has not been approved at this time.</p>
+            <p style="font-size: 13px; color: #475569;">You are encouraged to explore other projects and properties available on EstateXplorer.</p>
+            <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 24px 0;">
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">&copy; 2026 EstateXplorer. All rights reserved.</p>
+          </div>
+        `,
+      }).catch((mailErr) => console.error(`[Single Rejection Email Error] ${agentUser.email}:`, mailErr.message));
+    }
   } else if (normalizedStatus === 'suspended') {
     partnership.affiliateUrl = '';
     partnership.agentCode = undefined;

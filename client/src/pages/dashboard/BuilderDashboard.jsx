@@ -5,6 +5,7 @@ import {
   Edit2,
   Trash2,
   Building2,
+  Home,
   Calendar,
   Phone,
   Mail,
@@ -96,7 +97,9 @@ const BuilderDashboard = () => {
   const [invoiceBookingId, setInvoiceBookingId] = useState(null);
   const [projectSearch, setProjectSearch] = useState('');
   const [projectStatusFilter, setProjectStatusFilter] = useState('all');
-  const [projectCategoryFilter, setProjectCategoryFilter] = useState('all');
+  const [propertySearch, setPropertySearch] = useState('');
+  const [propertyStatusFilter, setPropertyStatusFilter] = useState('all');
+  const [addModalDefaultCategory, setAddModalDefaultCategory] = useState('project');
 
   // Inquiries / Leads State
   const [inquiries, setInquiries] = useState([]);
@@ -141,7 +144,8 @@ const BuilderDashboard = () => {
   const [agentPerformanceData, setAgentPerformanceData] = useState(null);
   const [performanceLoading, setPerformanceLoading] = useState(false);
 
-  const handleOpenAddProject = useCallback((propToEdit = null) => {
+  const handleOpenAddProject = useCallback((propToEdit = null, defaultCat = 'project') => {
+    setAddModalDefaultCategory(defaultCat || 'project');
     if (propToEdit) {
       setEditProperty(propToEdit);
       setIsModalOpen(true);
@@ -703,17 +707,21 @@ const BuilderDashboard = () => {
     });
   }, [siteVisitsList, leadSourceFilter]);
 
-  // Filtered projects
-  const filteredProjects = useMemo(() => {
-    return projects
+  // Separate Projects vs Properties (Requirement 6)
+  const builderProjects = useMemo(() => {
+    return projects.filter((p) => p.category === 'project' || p.isProject || p.propertyType === 'project' || Boolean(p.unitsCount || p.towersCount));
+  }, [projects]);
+
+  const builderProperties = useMemo(() => {
+    return projects.filter((p) => !(p.category === 'project' || p.isProject || p.propertyType === 'project' || Boolean(p.unitsCount || p.towersCount)));
+  }, [projects]);
+
+  // Filtered projects for Projects Tab
+  const filteredProjectsList = useMemo(() => {
+    return builderProjects
       .filter((p) => {
         if (projectStatusFilter === 'all') return true;
         return p.status === projectStatusFilter;
-      })
-      .filter((p) => {
-        if (projectCategoryFilter === 'all') return true;
-        const isProj = p.category === 'project' || p.isProject || p.propertyType === 'project' || Boolean(p.unitsCount || p.towersCount);
-        return projectCategoryFilter === 'project' ? isProj : !isProj;
       })
       .filter((p) => {
         if (!projectSearch) return true;
@@ -724,7 +732,25 @@ const BuilderDashboard = () => {
           (p.location?.address && p.location.address.toLowerCase().includes(q))
         );
       });
-  }, [projects, projectStatusFilter, projectCategoryFilter, projectSearch]);
+  }, [builderProjects, projectStatusFilter, projectSearch]);
+
+  // Filtered properties for Properties Tab
+  const filteredPropertiesList = useMemo(() => {
+    return builderProperties
+      .filter((p) => {
+        if (propertyStatusFilter === 'all') return true;
+        return p.status === propertyStatusFilter;
+      })
+      .filter((p) => {
+        if (!propertySearch) return true;
+        const q = propertySearch.toLowerCase();
+        return (
+          (p.title && p.title.toLowerCase().includes(q)) ||
+          (p.location?.city && p.location.city.toLowerCase().includes(q)) ||
+          (p.location?.address && p.location.address.toLowerCase().includes(q))
+        );
+      });
+  }, [builderProperties, propertyStatusFilter, propertySearch]);
 
   const visitCount = siteVisitsList.length;
   const newCount = propertyInquiries.length;
@@ -777,6 +803,160 @@ const BuilderDashboard = () => {
 
   const companyName = user?.builderProfile?.companyName || user?.name || 'Builder Partner';
 
+  const renderListingCard = (project) => (
+    <div
+      key={project._id}
+      className="border border-slate-200 rounded-xl overflow-hidden bg-white hover:shadow-md transition-shadow flex flex-col justify-between"
+    >
+      <div>
+        <div className="h-40 w-full bg-slate-100 relative">
+          <img
+            src={project.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600&auto=format&fit=crop'}
+            alt={project.title}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap">
+            <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
+              ? 'bg-purple-700 text-white'
+              : 'bg-blue-600 text-white'
+              }`}>
+              {(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount) ? 'Project' : 'Property'}
+            </span>
+            {project.rera && (
+              <span className="px-2 py-0.5 rounded text-[0.65rem] font-bold bg-emerald-600 text-white shadow-xs">
+                RERA
+              </span>
+            )}
+          </div>
+          <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[0.65rem] font-bold bg-white/90 text-slate-800 backdrop-blur-sm">
+            {project.statusLabel || (project.status === 'uc' ? 'Under Construction' : 'Ready')}
+          </span>
+        </div>
+        <div className="p-4">
+          <div className="text-[0.7rem] font-bold uppercase tracking-wider text-blue-600 mb-1">
+            {project.type || 'Residential Project'}
+          </div>
+          <h4 className="font-bold text-sm text-slate-900 mb-1">{project.title}</h4>
+          <p className="text-xs text-slate-500 mb-2.5 flex items-center gap-1">
+            <MapPin size={12} className="shrink-0" />
+            <span className="truncate">{project.location?.address}, {project.location?.city}</span>
+          </p>
+          <div className="flex items-baseline justify-between pt-2 border-t border-slate-100">
+            <div className="text-sm font-black text-slate-900">
+              {project.priceDisplay || `₹ ${project.price?.toLocaleString()}`}
+            </div>
+            <span className="text-[0.7rem] text-slate-500">
+              {project.area ? `${project.area} sq.ft` : ''}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Agent Workflow Status Badge & Action Controls (Spec §1, §3, §4, §10) */}
+      <div className="px-3.5 py-2.5 bg-slate-50/90 border-t border-slate-100 flex flex-col gap-2 text-xs">
+        <div className="flex items-center justify-between gap-1.5 flex-wrap">
+          <span className="text-[11px] font-semibold text-slate-600">Workflow Status:</span>
+          {project.publishingStatus === 'open_for_agent' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+              <Clock size={11} /> Open for Agents ({project.agentAssignmentExpiresAt ? Math.max(0, Math.ceil((new Date(project.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))) : 15}d left)
+            </span>
+          ) : project.publishingStatus === 'published_with_agent' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+              <UserCheck size={11} /> Assigned: {project.assignedAgent?.name || 'Agent Partner'}
+            </span>
+          ) : project.publishingStatus === 'published_direct' ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
+              <Globe size={11} /> Published Directly
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300">
+              In Inventory (Hidden)
+            </span>
+          )}
+        </div>
+
+        {/* Action Buttons based on publishing status */}
+        <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/60">
+          {(!project.publishingStatus || project.publishingStatus === 'in_inventory') && (
+            <>
+              <button
+                type="button"
+                onClick={() => handleOpenForAgent(project._id)}
+                className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <Clock size={11} /> Open for Agent Assignment
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePublishDirect(project._id)}
+                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+              >
+                <Globe size={11} /> Publish Directly
+              </button>
+            </>
+          )}
+
+          {project.publishingStatus === 'open_for_agent' && (
+            <button
+              type="button"
+              onClick={() => handlePublishDirect(project._id)}
+              className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <Globe size={11} /> Publish Directly Now
+            </button>
+          )}
+
+          {project.publishingStatus === 'published_direct' && (
+            <button
+              type="button"
+              onClick={() => handleOpenForAgent(project._id)}
+              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <Clock size={11} /> Re-open for Agent Assignment
+            </button>
+          )}
+
+          {project.publishingStatus === 'published_with_agent' && (
+            <button
+              type="button"
+              onClick={() => handleViewAgentPerformance(project)}
+              className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <TrendingUp size={11} /> Agent Performance
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="p-3 border-t border-slate-100 flex items-center justify-between bg-slate-50">
+        <Link
+          to={`/property/${project._id}`}
+          className="text-xs text-slate-600 font-semibold hover:text-blue-600 flex items-center gap-1"
+          target="_blank"
+        >
+          <ExternalLink size={13} /> View on Site
+        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setEditProperty(project);
+              setIsModalOpen(true);
+            }}
+            className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-blue-600 rounded-md transition-colors flex items-center gap-1"
+          >
+            <Edit2 size={12} /> Edit
+          </button>
+          <button
+            onClick={() => handleDelete(project._id)}
+            className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-300 hover:bg-red-50 text-red-600 rounded-md transition-colors flex items-center gap-1"
+          >
+            <Trash2 size={12} /> Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="builder-wrapper">
       {/* SIDEBAR */}
@@ -814,10 +994,24 @@ const BuilderDashboard = () => {
             >
               <span className="flex items-center gap-2">
                 <Building2 size={18} />
-                <span>Projects & Listings</span>
+                <span>Projects</span>
               </span>
-              {projects.length > 0 && (
-                <span className="nav-badge nav-badge-neutral">{projects.length}</span>
+              {builderProjects.length > 0 && (
+                <span className="nav-badge nav-badge-neutral">{builderProjects.length}</span>
+              )}
+            </button>
+
+            <button
+              onClick={() => handleTabChange('properties')}
+              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'properties' ? 'active' : ''
+                }`}
+            >
+              <span className="flex items-center gap-2">
+                <Home size={18} />
+                <span>Properties</span>
+              </span>
+              {builderProperties.length > 0 && (
+                <span className="nav-badge nav-badge-neutral">{builderProperties.length}</span>
               )}
             </button>
 
@@ -908,7 +1102,8 @@ const BuilderDashboard = () => {
           <div className="topbar-left">
             <h1 className="page-title">
               {activeTab === 'overview' && 'Builder Management Dashboard'}
-              {activeTab === 'projects' && 'Project & Development Portfolio'}
+              {activeTab === 'projects' && 'Projects Portfolio'}
+              {activeTab === 'properties' && 'Properties Portfolio'}
               {activeTab === 'leads' && 'Buyer Leads & Inquiries CRM'}
               {activeTab === 'visits' && 'Site Visit Bookings & Schedules'}
               {activeTab === 'requests' && 'Agent Acquisition Requests & Network'}
@@ -1283,13 +1478,13 @@ const BuilderDashboard = () => {
             </div>
           )}
 
-          {/* TAB 2: PROJECTS & DEVELOPMENTS */}
+          {/* TAB 2: PROJECTS */}
           {activeTab === 'projects' && (
             <div className="section-card">
               <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Building2 size={18} className="text-blue-600" />
-                  <h3 className="section-title !mb-0">All Projects & Properties ({filteredProjects.length})</h3>
+                  <h3 className="section-title !mb-0">All Projects ({filteredProjectsList.length})</h3>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
@@ -1317,19 +1512,8 @@ const BuilderDashboard = () => {
                     <option value="upcoming">New Launch</option>
                   </select>
 
-                  {/* Filter Type (Project vs Property) */}
-                  <select
-                    value={projectCategoryFilter}
-                    onChange={(e) => setProjectCategoryFilter(e.target.value)}
-                    className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
-                  >
-                    <option value="all">All Types</option>
-                    <option value="project">Only Projects</option>
-                    <option value="property">Only Properties</option>
-                  </select>
-
                   <button
-                    onClick={() => handleOpenAddProject(null)}
+                    onClick={() => handleOpenAddProject(null, 'project')}
                     className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
                   >
                     <Plus size={14} /> Add Project
@@ -1339,170 +1523,81 @@ const BuilderDashboard = () => {
 
               <div className="section-body">
                 {loading ? (
-                  <p className="text-xs text-slate-500">Loading listings...</p>
-                ) : filteredProjects.length === 0 ? (
+                  <p className="text-xs text-slate-500">Loading projects...</p>
+                ) : filteredProjectsList.length === 0 ? (
                   <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
                     <Building2 size={36} className="text-slate-400 mx-auto mb-2" />
                     <p className="text-sm font-bold text-slate-700">No project listings found</p>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Click "Add New Project" to create your first housing development.
+                      Click "Add Project" to create your first housing development.
                     </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredProjects.map((project) => (
-                      <div
-                        key={project._id}
-                        className="border border-slate-200 rounded-xl overflow-hidden bg-white hover:shadow-md transition-shadow flex flex-col justify-between"
-                      >
-                        <div>
-                          <div className="h-40 w-full bg-slate-100 relative">
-                            <img
-                              src={project.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600&auto=format&fit=crop'}
-                              alt={project.title}
-                              className="w-full h-full object-cover"
-                            />
-                            <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap">
-                              <span className={`px-2 py-0.5 rounded text-[0.65rem] font-extrabold uppercase tracking-wider shadow-xs ${(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount)
-                                ? 'bg-purple-700 text-white'
-                                : 'bg-blue-600 text-white'
-                                }`}>
-                                {(project.category === 'project' || project.isProject || project.propertyType === 'project' || project.unitsCount || project.towersCount) ? 'Project' : 'Property'}
-                              </span>
-                              {project.rera && (
-                                <span className="px-2 py-0.5 rounded text-[0.65rem] font-bold bg-emerald-600 text-white shadow-xs">
-                                  RERA
-                                </span>
-                              )}
-                            </div>
-                            <span className="absolute top-2 right-2 px-2 py-0.5 rounded text-[0.65rem] font-bold bg-white/90 text-slate-800 backdrop-blur-sm">
-                              {project.statusLabel || (project.status === 'uc' ? 'Under Construction' : 'Ready')}
-                            </span>
-                          </div>
-                          <div className="p-4">
-                            <div className="text-[0.7rem] font-bold uppercase tracking-wider text-blue-600 mb-1">
-                              {project.type || 'Residential Project'}
-                            </div>
-                            <h4 className="font-bold text-sm text-slate-900 mb-1">{project.title}</h4>
-                            <p className="text-xs text-slate-500 mb-2.5 flex items-center gap-1">
-                              <MapPin size={12} className="shrink-0" />
-                              <span className="truncate">{project.location?.address}, {project.location?.city}</span>
-                            </p>
-                            <div className="flex items-baseline justify-between pt-2 border-t border-slate-100">
-                              <div className="text-sm font-black text-slate-900">
-                                {project.priceDisplay || `₹ ${project.price?.toLocaleString()}`}
-                              </div>
-                              <span className="text-[0.7rem] text-slate-500">
-                                {project.area ? `${project.area} sq.ft` : ''}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                    {filteredProjectsList.map((project) => renderListingCard(project))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-                        {/* Agent Workflow Status Badge & Action Controls (Spec §1, §3, §4, §10) */}
-                        <div className="px-3.5 py-2.5 bg-slate-50/90 border-t border-slate-100 flex flex-col gap-2 text-xs">
-                          <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                            <span className="text-[11px] font-semibold text-slate-600">Workflow Status:</span>
-                            {project.publishingStatus === 'open_for_agent' ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                <Clock size={11} /> Open for Agents ({project.agentAssignmentExpiresAt ? Math.max(0, Math.ceil((new Date(project.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24))) : 15}d left)
-                              </span>
-                            ) : project.publishingStatus === 'published_with_agent' ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                <UserCheck size={11} /> Assigned: {project.assignedAgent?.name || 'Agent Partner'}
-                              </span>
-                            ) : project.publishingStatus === 'published_direct' ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
-                                <Globe size={11} /> Published Directly
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300">
-                                In Inventory (Hidden)
-                              </span>
-                            )}
-                          </div>
+          {/* TAB 3: PROPERTIES */}
+          {activeTab === 'properties' && (
+            <div className="section-card">
+              <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Home size={18} className="text-blue-600" />
+                  <h3 className="section-title !mb-0">All Properties ({filteredPropertiesList.length})</h3>
+                </div>
 
-                          {/* Action Buttons based on publishing status */}
-                          <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-200/60">
-                            {(!project.publishingStatus || project.publishingStatus === 'in_inventory') && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenForAgent(project._id)}
-                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                                >
-                                  <Clock size={11} /> Open for Agent Assignment
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePublishDirect(project._id)}
-                                  className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                                >
-                                  <Globe size={11} /> Publish Directly
-                                </button>
-                              </>
-                            )}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={propertySearch}
+                      onChange={(e) => setPropertySearch(e.target.value)}
+                      placeholder="Search properties..."
+                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
+                    />
+                  </div>
 
-                            {project.publishingStatus === 'open_for_agent' && (
-                              <button
-                                type="button"
-                                onClick={() => handlePublishDirect(project._id)}
-                                className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                              >
-                                <Globe size={11} /> Publish Directly Now
-                              </button>
-                            )}
+                  {/* Filter Status */}
+                  <select
+                    value={propertyStatusFilter}
+                    onChange={(e) => setPropertyStatusFilter(e.target.value)}
+                    className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="uc">Under Construction</option>
+                    <option value="ready">Ready to Move</option>
+                    <option value="upcoming">New Launch</option>
+                  </select>
 
-                            {project.publishingStatus === 'published_direct' && (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenForAgent(project._id)}
-                                className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                              >
-                                <Clock size={11} /> Re-open for Agent Assignment
-                              </button>
-                            )}
+                  <button
+                    onClick={() => handleOpenAddProject(null, 'property')}
+                    className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add Property
+                  </button>
+                </div>
+              </div>
 
-                            {project.publishingStatus === 'published_with_agent' && (
-                              <button
-                                type="button"
-                                onClick={() => handleViewAgentPerformance(project)}
-                                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
-                              >
-                                <TrendingUp size={11} /> Agent Performance
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="p-3 border-t border-slate-100 flex items-center justify-between bg-slate-50">
-                          <Link
-                            to={`/property/${project._id}`}
-                            className="text-xs text-slate-600 font-semibold hover:text-blue-600 flex items-center gap-1"
-                            target="_blank"
-                          >
-                            <ExternalLink size={13} /> View on Site
-                          </Link>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                setEditProperty(project);
-                                setIsModalOpen(true);
-                              }}
-                              className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-100 text-blue-600 rounded-md transition-colors flex items-center gap-1"
-                            >
-                              <Edit2 size={12} /> Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(project._id)}
-                              className="px-2.5 py-1 text-xs font-semibold bg-white border border-slate-300 hover:bg-red-50 text-red-600 rounded-md transition-colors flex items-center gap-1"
-                            >
-                              <Trash2 size={12} /> Delete
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+              <div className="section-body">
+                {loading ? (
+                  <p className="text-xs text-slate-500">Loading properties...</p>
+                ) : filteredPropertiesList.length === 0 ? (
+                  <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                    <Home size={36} className="text-slate-400 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">No property listings found</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Click "Add Property" to create your first property listing.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredPropertiesList.map((property) => renderListingCard(property))}
                   </div>
                 )}
               </div>
@@ -2606,6 +2701,7 @@ const BuilderDashboard = () => {
           <AddPropertyModal
             isOpen={isModalOpen}
             initialData={editProperty}
+            defaultCategory={addModalDefaultCategory}
             onClose={() => {
               setIsModalOpen(false);
               setEditProperty(null);
@@ -3244,64 +3340,67 @@ const BuilderDashboard = () => {
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Agent Identity Card */}
-                <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 flex items-center justify-between text-xs">
-                  <div>
-                    <span className="text-[11px] text-slate-500 block">Assigned Agent</span>
-                    <strong className="text-indigo-950 font-bold text-sm">
-                      {agentPerformanceData.agent?.name || 'Agent Partner'}
-                    </strong>
-                    {agentPerformanceData.agent?.email && (
-                      <div className="text-[11px] text-slate-500">{agentPerformanceData.agent.email}</div>
-                    )}
-                  </div>
-                  {agentPerformanceData.agent?.phone && (
-                    <div className="text-right">
-                      <span className="text-[10px] text-slate-400 block">Phone</span>
-                      <strong className="text-slate-700">{agentPerformanceData.agent.phone}</strong>
-                    </div>
-                  )}
-                </div>
+                {(() => {
+                  const agent = agentPerformanceData.assignedAgent || agentPerformanceData.agent || performanceModalProperty.assignedAgent || {};
+                  return (
+                    <>
+                      {/* Agent Identity Card */}
+                      <div className="p-4 bg-indigo-50/70 rounded-xl border border-indigo-100 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-xs uppercase shrink-0">
+                            {getInitials(agent.name || 'Agent')}
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-indigo-700 tracking-wider block">Assigned Agent</span>
+                            <strong className="text-slate-900 font-bold text-sm block">
+                              {agent.name || 'Agent Partner'}
+                            </strong>
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                              <Mail size={11} className="text-slate-400 shrink-0" />
+                              <span>{agent.email || '—'}</span>
+                            </div>
+                          </div>
+                        </div>
+                        {agent.phone && (
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Phone</span>
+                            <a href={`tel:${agent.phone}`} className="text-slate-800 font-bold text-xs flex items-center gap-1 hover:text-indigo-600 justify-end mt-0.5">
+                              <Phone size={11} className="text-slate-400" />
+                              <span>{agent.phone}</span>
+                            </a>
+                          </div>
+                        )}
+                      </div>
 
-                {/* 8 Specific Performance Metrics Grid (Spec §9, §10) */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Inquiries</span>
-                    <strong className="text-lg font-black text-slate-900 mt-0.5 block">{agentPerformanceData.metrics?.totalInquiries || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-blue-700 block">New Inquiries</span>
-                    <strong className="text-lg font-black text-blue-800 mt-0.5 block">{agentPerformanceData.metrics?.newInquiries || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-indigo-700 block">Contacted</span>
-                    <strong className="text-lg font-black text-indigo-800 mt-0.5 block">{agentPerformanceData.metrics?.contactedBuyers || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-amber-700 block">Visits Sched.</span>
-                    <strong className="text-lg font-black text-amber-800 mt-0.5 block">{agentPerformanceData.metrics?.scheduledVisits || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-emerald-700 block">Visits Done</span>
-                    <strong className="text-lg font-black text-emerald-800 mt-0.5 block">{agentPerformanceData.metrics?.completedVisits || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-purple-700 block">Follow-ups</span>
-                    <strong className="text-lg font-black text-purple-800 mt-0.5 block">{agentPerformanceData.metrics?.followUps || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-rose-50 rounded-xl border border-rose-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-rose-700 block">Interested</span>
-                    <strong className="text-lg font-black text-rose-800 mt-0.5 block">{agentPerformanceData.metrics?.interestedBuyers || 0}</strong>
-                  </div>
-                  <div className="p-3 bg-teal-50 rounded-xl border border-teal-200 text-center">
-                    <span className="text-[10px] uppercase font-bold text-teal-700 block">Bookings</span>
-                    <strong className="text-lg font-black text-teal-800 mt-0.5 block">{agentPerformanceData.metrics?.bookingsOrConversions || 0}</strong>
-                  </div>
-                </div>
+                      {/* 3 Required Performance Metrics Grid: Total Inquiries, Pending Inquiries, Site Visits Completed */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-center">
+                          <span className="text-[11px] uppercase font-bold text-slate-600 block">Total Inquiries</span>
+                          <strong className="text-2xl font-black text-slate-900 mt-1 block">
+                            {agentPerformanceData.metrics?.totalInquiries || 0}
+                          </strong>
+                          <span className="text-[10px] text-slate-400 mt-0.5 block">Total Received</span>
+                        </div>
 
-                <p className="text-[11px] text-slate-500 leading-relaxed italic bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  Note: The complete buyer CRM pipeline and lead communication are managed exclusively by the assigned agent. High-level metrics are tracked here for your review.
-                </p>
+                        <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-center">
+                          <span className="text-[11px] uppercase font-bold text-blue-700 block">Pending Inquiries</span>
+                          <strong className="text-2xl font-black text-blue-800 mt-1 block">
+                            {agentPerformanceData.metrics?.newInquiries || 0}
+                          </strong>
+                          <span className="text-[10px] text-blue-500 mt-0.5 block">Awaiting Action</span>
+                        </div>
+
+                        <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200 text-center">
+                          <span className="text-[11px] uppercase font-bold text-emerald-700 block">Site Visits Completed</span>
+                          <strong className="text-2xl font-black text-emerald-800 mt-1 block">
+                            {agentPerformanceData.metrics?.completedVisits || 0}
+                          </strong>
+                          <span className="text-[10px] text-emerald-600 mt-0.5 block">Completed</span>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
 

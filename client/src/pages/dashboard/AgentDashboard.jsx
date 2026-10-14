@@ -144,6 +144,7 @@ const AgentDashboard = () => {
   const [replyModalItem, setReplyModalItem] = useState(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [sendingReply, setSendingReply] = useState(false);
+  const [inquirySubTab, setInquirySubTab] = useState('new'); // 'new' | 'total'
 
   // Agent Acquisition Workflow State (Spec §2, §6, §7, §9)
   const [discoverProjectsList, setDiscoverProjectsList] = useState([]);
@@ -504,9 +505,23 @@ const AgentDashboard = () => {
     try {
       const res = await replyToInquiryApi(replyModalItem._id, replyMessage.trim());
       if (res.success) {
-        setInquiries((prev) => prev.filter((i) => i._id !== replyModalItem._id));
+        setInquiries((prev) =>
+          prev.map((i) =>
+            i._id === replyModalItem._id
+              ? {
+                  ...i,
+                  ...(res.data || {}),
+                  isAnswered: true,
+                  status: 'contacted',
+                  lifecycleStage: 'contacted',
+                  lastReply: replyMessage.trim(),
+                  repliedAt: new Date(),
+                }
+              : i
+          )
+        );
         setSelectedInquiryIds((prev) => prev.filter((id) => id !== replyModalItem._id));
-        showToast('Reply emailed to buyer and inquiry closed!', 'success');
+        showToast('Reply emailed to buyer! Inquiry marked as answered.', 'success');
         setReplyModalItem(null);
         setReplyMessage('');
         broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES);
@@ -572,9 +587,15 @@ const AgentDashboard = () => {
   const propertyInquiries = inquiries.filter((e) => !e.visitRequested && e.status !== 'visit');
   const siteVisitsList = inquiries.filter((e) => e.visitRequested || e.status === 'visit');
 
-  // Filtered inquiries strictly for Property Inquiries Tab (no site visits, no phone search)
+  // New Inquiries: inquiries that have not been answered or resolved yet
+  const newPropertyInquiries = useMemo(() => {
+    return propertyInquiries.filter((e) => !e.isAnswered && e.status !== 'contacted' && e.status !== 'closed');
+  }, [propertyInquiries]);
+
+  // Filtered inquiries strictly for Property Inquiries Tab based on active sub-tab (New vs Total)
   const filteredInquiries = useMemo(() => {
-    return propertyInquiries.filter((e) => {
+    const list = inquirySubTab === 'new' ? newPropertyInquiries : propertyInquiries;
+    return list.filter((e) => {
       if (!leadSearch) return true;
       const q = leadSearch.toLowerCase();
       return (
@@ -585,7 +606,7 @@ const AgentDashboard = () => {
         (e.message && e.message.toLowerCase().includes(q))
       );
     });
-  }, [propertyInquiries, leadSearch]);
+  }, [inquirySubTab, newPropertyInquiries, propertyInquiries, leadSearch]);
 
   // Filtered properties (only properties where no other agent is assigned, or assigned to current agent)
   const filteredProperties = useMemo(() => {
@@ -1352,7 +1373,7 @@ const AgentDashboard = () => {
               <div className="card-header flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div>
                   <h2 className="card-title text-base font-bold text-slate-900">
-                    Property Inquiries ({filteredInquiries.length})
+                    Property Inquiries ({propertyInquiries.length})
                   </h2>
                   <span className="text-xs text-muted">
                     Questions and messages from buyers interested in your properties
@@ -1379,6 +1400,53 @@ const AgentDashboard = () => {
                     <Download size={13} /> Export CSV
                   </button>
                 </div>
+              </div>
+
+              {/* Inquiry Sub-Tabs: New Inquiries vs Total Inquiries */}
+              <div className="px-4 pt-2.5 pb-0 flex items-center gap-3 border-b border-slate-200 bg-slate-50/60">
+                <button
+                  type="button"
+                  onClick={() => setInquirySubTab('new')}
+                  className={`pb-2 px-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+                    inquirySubTab === 'new'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <MessageSquare size={13} />
+                  <span>New Inquiries</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      inquirySubTab === 'new'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {newPropertyInquiries.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInquirySubTab('total')}
+                  className={`pb-2 px-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-all cursor-pointer ${
+                    inquirySubTab === 'total'
+                      ? 'border-blue-600 text-blue-600'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <CheckCircle2 size={13} />
+                  <span>Total Inquiries</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      inquirySubTab === 'total'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {propertyInquiries.length}
+                  </span>
+                </button>
               </div>
 
               <div className="card-body p-4">
@@ -1515,6 +1583,19 @@ const AgentDashboard = () => {
                                   <div className="text-xs leading-relaxed">
                                     {lead.message || '—'}
                                   </div>
+                                  {lead.isAnswered && (
+                                    <div className="mt-2 p-2 rounded-lg bg-emerald-50/90 border border-emerald-200 text-[11px] text-emerald-900">
+                                      <div className="flex items-center gap-1 font-bold text-emerald-800">
+                                        <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                                        <span>Answered {lead.repliedAt ? `(${new Date(lead.repliedAt).toLocaleDateString()})` : ''}</span>
+                                      </div>
+                                      {lead.lastReply && (
+                                        <div className="mt-0.5 text-slate-700 italic text-[11px] line-clamp-2">
+                                          &ldquo;{lead.lastReply}&rdquo;
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* Lead Status & Lifecycle Stage (Spec §8, §9) */}
@@ -1569,11 +1650,15 @@ const AgentDashboard = () => {
                                         setReplyModalItem(lead);
                                         setReplyMessage('');
                                       }}
-                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-colors shadow-xs cursor-pointer whitespace-nowrap shrink-0"
-                                      title="Reply to buyer via Email"
+                                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors shadow-xs cursor-pointer whitespace-nowrap shrink-0 ${
+                                        lead.isAnswered
+                                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                          : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                      }`}
+                                      title={lead.isAnswered ? 'Reply again to buyer via Email' : 'Reply to buyer via Email'}
                                     >
                                       <Mail size={12} className="shrink-0" />
-                                      <span className="whitespace-nowrap">Reply</span>
+                                      <span className="whitespace-nowrap">{lead.isAnswered ? 'Reply Again' : 'Reply'}</span>
                                     </button>
                                     <button
                                       type="button"

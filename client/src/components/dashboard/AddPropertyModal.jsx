@@ -9,7 +9,7 @@ import { INDIAN_STATES } from '../../utils/indianStates';
 import { formatPrice, formatTitleCase, formatCode, sanitizeInput, getPublicImageUrl, isVideoUrl } from '../../utils/formatters';
 import KycVerificationModal from './KycVerificationModal';
 
-const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) => {
+const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defaultCategory = 'property' }) => {
   const { user, showToast } = useAuth();
   const [submitting, setSubmitting] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState(false);
@@ -28,7 +28,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
     watch
   } = useForm({
     defaultValues: {
-      category: 'property',
+      category: defaultCategory || 'property',
       purpose: 'buy',
       type: '2 BHK Apartment',
       status: 'under_construction',
@@ -115,7 +115,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
     } else if (isOpen) {
       reset({
         title: '',
-        category: 'property',
+        category: defaultCategory || 'property',
         purpose: 'buy',
         type: '2 BHK Apartment',
         description: '',
@@ -138,7 +138,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
       });
       setImages(['']);
     }
-  }, [initialData, isOpen, reset]);
+  }, [initialData, isOpen, reset, defaultCategory]);
 
   if (!isOpen) return null;
 
@@ -203,8 +203,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null }) =>
         usps,
         images: validImages,
         reraId: data.rera ? formatCode(data.reraId) : '',
-        rera: Boolean(data.rera),
-        isFeatured: data.isFeatured,
+        isFeatured: Boolean(data.isFeatured),
         allowAgentAcquisition: Boolean(data.allowAgentAcquisition),
         networkEnabled: Boolean(data.allowAgentAcquisition),
         commissionAmount: data.allowAgentAcquisition && data.commissionAmount ? Number(data.commissionAmount) : 0,

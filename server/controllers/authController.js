@@ -1189,6 +1189,30 @@ exports.googleAuth = async (req, res, next) => {
         );
       }
 
+      // Requirement: When a user registers for the first time using Google, ask for their phone number
+      const phoneInput = req.body.phone ? String(req.body.phone).trim() : '';
+      if (!phoneInput) {
+        return res.status(200).json({
+          success: false,
+          requiresPhone: true,
+          email: normalizedEmail,
+          name,
+          picture: picture || '',
+          googleId,
+          message: 'Please provide your mobile number to complete registration.',
+        });
+      }
+
+      const cleanPhone = phoneInput.replace(/\D/g, '').slice(-10);
+      if (cleanPhone.length !== 10) {
+        return next(new AppError('Please enter a valid 10-digit mobile number.', 400));
+      }
+
+      const phoneExists = await User.findOne({ phone: cleanPhone });
+      if (phoneExists) {
+        return next(new AppError('This mobile number is already registered. Please use a different mobile number.', 400));
+      }
+
       const activeRole = chosenRole && ['buyer', 'owner', 'builder', 'agent'].includes(chosenRole)
         ? chosenRole
         : 'buyer';
@@ -1197,6 +1221,7 @@ exports.googleAuth = async (req, res, next) => {
       user = await User.create({
         name,
         email: normalizedEmail,
+        phone: cleanPhone,
         googleId,
         authProvider: 'google',
         role: activeRole,

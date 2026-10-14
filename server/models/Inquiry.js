@@ -103,6 +103,24 @@ const inquirySchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isAnswered: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    repliedAt: {
+      type: Date,
+      default: null,
+    },
+    lastReply: {
+      type: String,
+      default: '',
+    },
+    repliedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     // Channel Partner & Attribution Engine fields
     agent: {
       type: mongoose.Schema.Types.ObjectId,
