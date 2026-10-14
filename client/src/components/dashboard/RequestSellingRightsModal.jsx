@@ -73,7 +73,12 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
           </div>
           <div className="flex items-center gap-2 pt-1 border-t border-slate-200 text-emerald-800 font-bold">
             <Award size={14} />
-            <span>Offered Commission: {project.defaultCommissionRate || 2.5}% of Agreement Value</span>
+            <span>
+              Offered Commission:{' '}
+              {project.commissionAmount > 0
+                ? `₹ ${Number(project.commissionAmount).toLocaleString('en-IN')}`
+                : (project.defaultCommissionRate ? `${project.defaultCommissionRate}% of Agreement Value` : 'Terms upon discussion')}
+            </span>
           </div>
         </div>
 

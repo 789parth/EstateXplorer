@@ -1940,7 +1940,6 @@ const AgentDashboard = () => {
                       const isRejected = partnership?.status === 'rejected';
                       const sellerName = item.builder?.companyName || item.builder?.name || item.user?.companyName || item.user?.name || (isProject ? 'Verified Developer' : 'Property Owner');
                       const img = item.images?.[0] || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600';
-                      const commissionRate = item.defaultCommissionRate || 2.5;
 
                       return (
                         <div
@@ -1955,28 +1954,27 @@ const AgentDashboard = () => {
                                 alt={item.title}
                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                               />
-                              <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 flex-wrap">
-                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs ${isProject ? 'bg-purple-700' : 'bg-amber-600'
-                                  }`}>
-                                  {isProject ? 'Master Project' : 'Property'}
-                                </span>
-                                {item.statusLabel && (
-                                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/90 text-slate-800 backdrop-blur-xs">
-                                    {item.statusLabel}
+                              <div className="absolute top-2.5 left-2.5 right-2.5 flex items-start justify-between gap-2 pointer-events-none">
+                                <div className="flex items-center gap-1.5 flex-wrap max-w-[65%]">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-white shadow-xs ${isProject ? 'bg-purple-700' : 'bg-amber-600'
+                                    }`}>
+                                    {isProject ? 'Master Project' : 'Property'}
                                   </span>
-                                )}
-                              </div>
+                                  {item.statusLabel && (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-white/90 text-slate-800 backdrop-blur-xs shadow-xs">
+                                      {item.statusLabel}
+                                    </span>
+                                  )}
+                                </div>
 
-                              <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 flex-wrap justify-end">
-                                {item.agentAssignmentExpiresAt && (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/90 text-white backdrop-blur-xs flex items-center gap-1 shadow-xs">
-                                    <Clock size={10} />
-                                    <span>{Math.max(0, Math.ceil((new Date(item.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24)))}d left to apply</span>
-                                  </span>
-                                )}
-                                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-600 text-white shadow-xs flex items-center gap-1">
-                                  <Award size={11} /> {commissionRate}% Comm.
-                                </span>
+                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                  {item.agentAssignmentExpiresAt && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/90 text-white backdrop-blur-xs flex items-center gap-1 shadow-xs">
+                                      <Clock size={10} />
+                                      <span>{Math.max(0, Math.ceil((new Date(item.agentAssignmentExpiresAt) - new Date()) / (1000 * 60 * 60 * 24)))}d left</span>
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
@@ -2033,7 +2031,7 @@ const AgentDashboard = () => {
                                 <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
                                   {item.commissionAmount > 0
                                     ? `₹ ${Number(item.commissionAmount).toLocaleString('en-IN')}`
-                                    : `${item.defaultCommissionRate || 2.5}%`}
+                                    : (item.defaultCommissionRate ? `${item.defaultCommissionRate}%` : 'Upon Discussion')}
                                 </span>
                               </div>
                             </div>
@@ -2215,7 +2213,6 @@ const AgentDashboard = () => {
                       const isRejected = item.status === 'rejected';
                       const affiliateCode = item.agentCode || user?.agentCode || user?._id;
                       const affiliateUrl = item.affiliateUrl || `${window.location.origin}/property/${projId}?agent=${affiliateCode}`;
-                      const commissionRate = item.commissionRate || project.defaultCommissionRate || 2.5;
 
                       return (
                         <div
@@ -2267,7 +2264,14 @@ const AgentDashboard = () => {
 
                               <div className="text-[11px] text-emerald-800 font-bold flex items-center gap-1">
                                 <Award size={12} />
-                                <span>Commission Terms: {commissionRate}% of verified agreement value</span>
+                                <span>
+                                  Commission Terms:{' '}
+                                  {project.commissionAmount > 0
+                                    ? `₹ ${Number(project.commissionAmount).toLocaleString('en-IN')}`
+                                    : (item.commissionRate || project.defaultCommissionRate
+                                        ? `${item.commissionRate || project.defaultCommissionRate}% of verified agreement value`
+                                        : 'Terms upon agreement')}
+                                </span>
                               </div>
                             </div>
                           </div>
