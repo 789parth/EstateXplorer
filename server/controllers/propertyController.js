@@ -1947,6 +1947,21 @@ exports.openPropertyForAgent = async (req, res, next) => {
     property.agentAssignmentOpenedAt = now;
     property.agentAssignmentExpiresAt = expiresAt;
 
+    if (req.body.commissionAmount !== undefined && req.body.commissionAmount !== null) {
+      const parsedAmount = Number(req.body.commissionAmount);
+      if (!isNaN(parsedAmount) && parsedAmount >= 0) {
+        property.commissionAmount = parsedAmount;
+      }
+    }
+
+    if (req.body.commissionRate !== undefined || req.body.defaultCommissionRate !== undefined) {
+      const rateVal = req.body.commissionRate !== undefined ? req.body.commissionRate : req.body.defaultCommissionRate;
+      const parsedRate = Number(rateVal);
+      if (!isNaN(parsedRate) && parsedRate >= 0 && parsedRate <= 100) {
+        property.defaultCommissionRate = parsedRate;
+      }
+    }
+
     await property.save();
     memoryCache.clear('properties');
 

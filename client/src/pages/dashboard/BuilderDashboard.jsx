@@ -150,6 +150,12 @@ const BuilderDashboard = () => {
   const [agentPerformanceData, setAgentPerformanceData] = useState(null);
   const [performanceLoading, setPerformanceLoading] = useState(false);
 
+  // Re-open for Agent Assignment Commission Modal State (Phase 4)
+  const [reopenCommissionProperty, setReopenCommissionProperty] = useState(null);
+  const [reopenCommissionType, setReopenCommissionType] = useState('amount'); // 'amount' | 'rate'
+  const [reopenCommissionValue, setReopenCommissionValue] = useState('');
+  const [reopeningForAgent, setReopeningForAgent] = useState(false);
+
   const handleOpenAddProject = useCallback((propToEdit = null, defaultCat = 'project') => {
     setAddModalDefaultCategory(defaultCat || 'project');
     if (propToEdit) {
@@ -350,17 +356,67 @@ const BuilderDashboard = () => {
     }
   };
 
-  // Phase 4: Open Property For Agent Assignment (15-day window, hides property)
-  const handleOpenForAgent = async (propertyId) => {
+  // Open Property For Agent Assignment - trigger commission modal first
+  const handleOpenForAgent = (project) => {
+    // If passed an ID string, find the project object
+    const projectObj = typeof project === 'string' ? projects.find(p => p._id === project) : project;
+    setReopenCommissionProperty(projectObj || { _id: project });
+    if (projectObj?.commissionAmount > 0) {
+      setReopenCommissionType('amount');
+      setReopenCommissionValue(String(projectObj.commissionAmount));
+    } else if (projectObj?.defaultCommissionRate) {
+      setReopenCommissionType('rate');
+      setReopenCommissionValue(String(projectObj.defaultCommissionRate));
+    } else {
+      setReopenCommissionType('amount');
+      setReopenCommissionValue('');
+    }
+  };
+
+  const handleConfirmReopenForAgent = async (e) => {
+    if (e) e.preventDefault();
+    if (!reopenCommissionProperty?._id) return;
+
+    const val = Number(reopenCommissionValue);
+    if (!reopenCommissionValue || isNaN(val) || val <= 0) {
+      showToast(
+        reopenCommissionType === 'amount'
+          ? 'Please enter a valid commission amount (₹)'
+          : 'Please enter a valid commission percentage (%)',
+        'error'
+      );
+      return;
+    }
+
+    if (reopenCommissionType === 'rate' && val > 100) {
+      showToast('Commission percentage cannot exceed 100%', 'error');
+      return;
+    }
+
+    setReopeningForAgent(true);
     try {
-      const res = await openPropertyForAgentApi(propertyId);
+      const payload = reopenCommissionType === 'amount'
+        ? { commissionAmount: val, defaultCommissionRate: 0 }
+        : { defaultCommissionRate: val, commissionAmount: 0 };
+
+      const res = await openPropertyForAgentApi(reopenCommissionProperty._id, payload);
       if (res.success) {
-        showToast(res.message || 'Property opened for agent assignment! Visible to agents for 15 days.', 'success');
+        showToast(
+          res.message || 'Property reopened for agent assignment with commission details updated!',
+          'success'
+        );
+        setReopenCommissionProperty(null);
+        setReopenCommissionValue('');
         await fetchProperties();
-        broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, { action: 'opened_for_agent', id: propertyId });
+        broadcastRealtimeSync(SYNC_EVENTS.PROPERTIES, {
+          action: 'opened_for_agent',
+          id: reopenCommissionProperty._id,
+        });
       }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to open property for agent assignment', 'error');
+    } finally {
+      setReopeningForAgent(false);
     }
   };
 
@@ -887,7 +943,7 @@ const BuilderDashboard = () => {
             <>
               <button
                 type="button"
-                onClick={() => handleOpenForAgent(project._id)}
+                onClick={() => handleOpenForAgent(project)}
                 className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
               >
                 <Clock size={11} /> Open for Agent Assignment
@@ -915,7 +971,7 @@ const BuilderDashboard = () => {
           {project.publishingStatus === 'published_direct' && (
             <button
               type="button"
-              onClick={() => handleOpenForAgent(project._id)}
+              onClick={() => handleOpenForAgent(project)}
               className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
             >
               <Clock size={11} /> Re-open for Agent Assignment
@@ -3473,6 +3529,140 @@ const BuilderDashboard = () => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Set Commission Before Re-opening Agent Assignment (Phase 4) */}
+      {reopenCommissionProperty && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+                <Award size={18} className="text-amber-600" />
+                <span>Set Agent Commission</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReopenCommissionProperty(null);
+                  setReopenCommissionValue('');
+                }}
+                disabled={reopeningForAgent}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mb-4 bg-amber-50/70 p-3 rounded-xl border border-amber-200/80 text-xs text-amber-900">
+              <p className="font-semibold text-slate-800 truncate mb-1">
+                {reopenCommissionProperty.title || 'Selected Listing'}
+              </p>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                Before re-opening agent assignment, specify the commission offered to agents for verified bookings. This commission will be displayed on the Agent Dashboard.
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmReopenForAgent} className="space-y-4">
+              {/* Commission Type Toggle */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Commission Structure
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReopenCommissionType('amount');
+                      if (reopenCommissionType !== 'amount') setReopenCommissionValue('');
+                    }}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      reopenCommissionType === 'amount'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Fixed Amount (₹)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReopenCommissionType('rate');
+                      if (reopenCommissionType !== 'rate') setReopenCommissionValue('');
+                    }}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      reopenCommissionType === 'rate'
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Percentage (%)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Commission Value Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {reopenCommissionType === 'amount'
+                    ? 'Commission Amount (₹)'
+                    : 'Commission Percentage (%)'}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">
+                    {reopenCommissionType === 'amount' ? '₹' : '%'}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step={reopenCommissionType === 'amount' ? '1000' : '0.1'}
+                    max={reopenCommissionType === 'rate' ? '100' : undefined}
+                    value={reopenCommissionValue}
+                    onChange={(e) => setReopenCommissionValue(e.target.value)}
+                    placeholder={reopenCommissionType === 'amount' ? 'e.g. 50000' : 'e.g. 2'}
+                    className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-300 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-amber-500 font-semibold"
+                    autoFocus
+                    required
+                  />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {reopenCommissionType === 'amount'
+                    ? 'Enter the fixed commission amount paid per completed sale/booking.'
+                    : 'Enter the percentage of agreement value offered to representing agents.'}
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReopenCommissionProperty(null);
+                    setReopenCommissionValue('');
+                  }}
+                  disabled={reopeningForAgent}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={reopeningForAgent}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition-all shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  {reopeningForAgent ? (
+                    <span>Opening...</span>
+                  ) : (
+                    <>
+                      <Clock size={13} />
+                      <span>Confirm &amp; Re-open</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

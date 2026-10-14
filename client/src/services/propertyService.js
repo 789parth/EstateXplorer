@@ -175,9 +175,9 @@ export const verifyRazorpayPaymentApi = async (id, verificationData) => {
   return response.data;
 };
 
-export const openPropertyForAgentApi = async (id) => {
+export const openPropertyForAgentApi = async (id, data = {}) => {
   invalidateClientPropertyCache();
-  const response = await api.post(`/properties/${id}/open-for-agent`);
+  const response = await api.post(`/properties/${id}/open-for-agent`, data);
   return response.data;
 };
 
