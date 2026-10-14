@@ -64,7 +64,7 @@ const BookUnitModal = lazy(() => import('../../components/dashboard/BookUnitModa
 const BookingInvoiceModal = lazy(() => import('../../components/dashboard/BookingInvoiceModal'));
 const KycVerificationModal = lazy(() => import('../../components/dashboard/KycVerificationModal'));
 
-const VALID_BUILDER_TABS = ['overview', 'projects', 'leads', 'visits', 'requests'];
+const VALID_BUILDER_TABS = ['overview', 'projects', 'properties', 'listings', 'leads', 'visits', 'requests'];
 
 const BuilderDashboard = () => {
   const { user, accessToken, showToast, logout } = useAuth();
@@ -72,10 +72,16 @@ const BuilderDashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const tabFromUrl = searchParams.get('tab');
   const [activeTab, setActiveTab] = useState(VALID_BUILDER_TABS.includes(tabFromUrl) ? tabFromUrl : 'overview');
+  const [listingsSubTab, setListingsSubTab] = useState(tabFromUrl === 'properties' ? 'properties' : 'projects');
 
   useEffect(() => {
     if (tabFromUrl && VALID_BUILDER_TABS.includes(tabFromUrl) && tabFromUrl !== activeTab) {
       setActiveTab(tabFromUrl);
+      if (tabFromUrl === 'properties') {
+        setListingsSubTab('properties');
+      } else if (tabFromUrl === 'projects') {
+        setListingsSubTab('projects');
+      }
     }
   }, [tabFromUrl]);
 
@@ -989,29 +995,15 @@ const BuilderDashboard = () => {
 
             <button
               onClick={() => handleTabChange('projects')}
-              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'projects' ? 'active' : ''
+              className={`nav-item w-full text-left flex items-center justify-between ${['projects', 'properties', 'listings'].includes(activeTab) ? 'active' : ''
                 }`}
             >
               <span className="flex items-center gap-2">
                 <Building2 size={18} />
-                <span>Projects</span>
+                <span>Projects & Properties</span>
               </span>
-              {builderProjects.length > 0 && (
-                <span className="nav-badge nav-badge-neutral">{builderProjects.length}</span>
-              )}
-            </button>
-
-            <button
-              onClick={() => handleTabChange('properties')}
-              className={`nav-item w-full text-left flex items-center justify-between ${activeTab === 'properties' ? 'active' : ''
-                }`}
-            >
-              <span className="flex items-center gap-2">
-                <Home size={18} />
-                <span>Properties</span>
-              </span>
-              {builderProperties.length > 0 && (
-                <span className="nav-badge nav-badge-neutral">{builderProperties.length}</span>
+              {projects.length > 0 && (
+                <span className="nav-badge nav-badge-neutral">{projects.length}</span>
               )}
             </button>
 
@@ -1478,129 +1470,194 @@ const BuilderDashboard = () => {
             </div>
           )}
 
-          {/* TAB 2: PROJECTS */}
-          {activeTab === 'projects' && (
+          {/* COMBINED TAB: PROJECTS & PROPERTIES */}
+          {['projects', 'properties', 'listings'].includes(activeTab) && (
             <div className="section-card">
+              {/* Top Section Header with Title and Unified Sub-Tabs */}
               <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <Building2 size={18} className="text-blue-600" />
-                  <h3 className="section-title !mb-0">All Projects ({filteredProjectsList.length})</h3>
+                  {listingsSubTab === 'projects' ? (
+                    <Building2 size={20} className="text-blue-600" />
+                  ) : (
+                    <Home size={20} className="text-blue-600" />
+                  )}
+                  <div>
+                    <h3 className="section-title !mb-0 font-bold text-slate-800">Projects & Properties</h3>
+                    <p className="text-[0.72rem] text-slate-500">Manage all your development projects and individual property listings</p>
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Search */}
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={projectSearch}
-                      onChange={(e) => setProjectSearch(e.target.value)}
-                      placeholder="Search projects..."
-                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
-                    />
-                  </div>
-
-                  {/* Filter Status */}
-                  <select
-                    value={projectStatusFilter}
-                    onChange={(e) => setProjectStatusFilter(e.target.value)}
-                    className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
+                {/* Sub-tabs toggle */}
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setListingsSubTab('projects');
+                      if (activeTab === 'properties') handleTabChange('projects');
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      listingsSubTab === 'projects'
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <option value="all">All Statuses</option>
-                    <option value="uc">Under Construction</option>
-                    <option value="ready">Ready to Move</option>
-                    <option value="upcoming">New Launch</option>
-                  </select>
+                    <Building2 size={14} />
+                    <span>Projects</span>
+                    <span className={`text-[0.68rem] px-1.5 py-0.2 rounded-full ${
+                      listingsSubTab === 'projects' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {builderProjects.length}
+                    </span>
+                  </button>
 
                   <button
-                    onClick={() => handleOpenAddProject(null, 'project')}
-                    className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
+                    type="button"
+                    onClick={() => {
+                      setListingsSubTab('properties');
+                      if (activeTab === 'projects') handleTabChange('properties');
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      listingsSubTab === 'properties'
+                        ? 'bg-white text-blue-600 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <Plus size={14} /> Add Project
+                    <Home size={14} />
+                    <span>Properties</span>
+                    <span className={`text-[0.68rem] px-1.5 py-0.2 rounded-full ${
+                      listingsSubTab === 'properties' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {builderProperties.length}
+                    </span>
                   </button>
                 </div>
               </div>
 
-              <div className="section-body">
-                {loading ? (
-                  <p className="text-xs text-slate-500">Loading projects...</p>
-                ) : filteredProjectsList.length === 0 ? (
-                  <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                    <Building2 size={36} className="text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-bold text-slate-700">No project listings found</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Click "Add Project" to create your first housing development.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredProjectsList.map((project) => renderListingCard(project))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+              {/* Sub-Tab 1: PROJECTS */}
+              {listingsSubTab === 'projects' && (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-slate-50/70 p-2.5 rounded-lg border border-slate-200/60">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Building2 size={14} className="text-blue-600" />
+                      Showing Projects ({filteredProjectsList.length})
+                    </span>
 
-          {/* TAB 3: PROPERTIES */}
-          {activeTab === 'properties' && (
-            <div className="section-card">
-              <div className="section-header pb-3 border-b border-border mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Home size={18} className="text-blue-600" />
-                  <h3 className="section-title !mb-0">All Properties ({filteredPropertiesList.length})</h3>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {/* Search */}
+                      <div className="relative">
+                        <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={projectSearch}
+                          onChange={(e) => setProjectSearch(e.target.value)}
+                          placeholder="Search projects..."
+                          className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
+                        />
+                      </div>
+
+                      {/* Filter Status */}
+                      <select
+                        value={projectStatusFilter}
+                        onChange={(e) => setProjectStatusFilter(e.target.value)}
+                        className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
+                      >
+                        <option value="all">All Statuses</option>
+                        <option value="uc">Under Construction</option>
+                        <option value="ready">Ready to Move</option>
+                        <option value="upcoming">New Launch</option>
+                      </select>
+
+                      <button
+                        onClick={() => handleOpenAddProject(null, 'project')}
+                        className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
+                      >
+                        <Plus size={14} /> Add Project
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="section-body">
+                    {loading ? (
+                      <p className="text-xs text-slate-500">Loading projects...</p>
+                    ) : filteredProjectsList.length === 0 ? (
+                      <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                        <Building2 size={36} className="text-slate-400 mx-auto mb-2" />
+                        <p className="text-sm font-bold text-slate-700">No project listings found</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Click "Add Project" to create your first housing development.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredProjectsList.map((project) => renderListingCard(project))}
+                      </div>
+                    )}
+                  </div>
                 </div>
+              )}
 
-                <div className="flex flex-wrap items-center gap-2.5">
-                  {/* Search */}
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={propertySearch}
-                      onChange={(e) => setPropertySearch(e.target.value)}
-                      placeholder="Search properties..."
-                      className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
-                    />
+              {/* Sub-Tab 2: PROPERTIES */}
+              {listingsSubTab === 'properties' && (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-4 bg-slate-50/70 p-2.5 rounded-lg border border-slate-200/60">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Home size={14} className="text-blue-600" />
+                      Showing Properties ({filteredPropertiesList.length})
+                    </span>
+
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {/* Search */}
+                      <div className="relative">
+                        <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={propertySearch}
+                          onChange={(e) => setPropertySearch(e.target.value)}
+                          placeholder="Search properties..."
+                          className="pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-blue-600 w-48"
+                        />
+                      </div>
+
+                      {/* Filter Status */}
+                      <select
+                        value={propertyStatusFilter}
+                        onChange={(e) => setPropertyStatusFilter(e.target.value)}
+                        className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
+                      >
+                        <option value="all">All Statuses</option>
+                        <option value="uc">Under Construction</option>
+                        <option value="ready">Ready to Move</option>
+                        <option value="upcoming">New Launch</option>
+                      </select>
+
+                      <button
+                        onClick={() => handleOpenAddProject(null, 'property')}
+                        className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
+                      >
+                        <Plus size={14} /> Add Property
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Filter Status */}
-                  <select
-                    value={propertyStatusFilter}
-                    onChange={(e) => setPropertyStatusFilter(e.target.value)}
-                    className="text-xs py-1.5 px-2.5 border border-slate-300 rounded-lg bg-white focus:outline-none"
-                  >
-                    <option value="all">All Statuses</option>
-                    <option value="uc">Under Construction</option>
-                    <option value="ready">Ready to Move</option>
-                    <option value="upcoming">New Launch</option>
-                  </select>
-
-                  <button
-                    onClick={() => handleOpenAddProject(null, 'property')}
-                    className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1"
-                  >
-                    <Plus size={14} /> Add Property
-                  </button>
+                  <div className="section-body">
+                    {loading ? (
+                      <p className="text-xs text-slate-500">Loading properties...</p>
+                    ) : filteredPropertiesList.length === 0 ? (
+                      <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                        <Home size={36} className="text-slate-400 mx-auto mb-2" />
+                        <p className="text-sm font-bold text-slate-700">No property listings found</p>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Click "Add Property" to create your first property listing.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredPropertiesList.map((property) => renderListingCard(property))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-
-              <div className="section-body">
-                {loading ? (
-                  <p className="text-xs text-slate-500">Loading properties...</p>
-                ) : filteredPropertiesList.length === 0 ? (
-                  <div className="text-center py-10 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                    <Home size={36} className="text-slate-400 mx-auto mb-2" />
-                    <p className="text-sm font-bold text-slate-700">No property listings found</p>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Click "Add Property" to create your first property listing.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredPropertiesList.map((property) => renderListingCard(property))}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
 

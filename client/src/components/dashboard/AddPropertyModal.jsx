@@ -107,7 +107,6 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         reraId: initialData.reraId || '',
         uspsString: initialData.usps ? initialData.usps.join(', ') : '',
         amenitiesString: initialData.amenities ? initialData.amenities.join(', ') : '',
-        isFeatured: initialData.isFeatured || false,
         allowAgentAcquisition: Boolean(initialData.allowAgentAcquisition ?? initialData.networkEnabled),
         commissionAmount: initialData.commissionAmount || '',
       });
@@ -132,7 +131,6 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         reraId: '',
         uspsString: '',
         amenitiesString: '',
-        isFeatured: false,
         allowAgentAcquisition: false,
         commissionAmount: '',
       });
@@ -203,7 +201,6 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         usps,
         images: validImages,
         reraId: data.rera ? formatCode(data.reraId) : '',
-        isFeatured: Boolean(data.isFeatured),
         allowAgentAcquisition: Boolean(data.allowAgentAcquisition),
         networkEnabled: Boolean(data.allowAgentAcquisition),
         commissionAmount: data.allowAgentAcquisition && data.commissionAmount ? Number(data.commissionAmount) : 0,
@@ -723,13 +720,6 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
                   <button type="button" onClick={addImageField} className="mt-2 text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors inline-flex items-center gap-1">
                     + Add Another Photo or Video URL
                   </button>
-                </div>
-                
-                <div className="flex items-center gap-2 mt-4 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
-                  <input type="checkbox" id="isFeatured" className="w-4 h-4 rounded border-light text-blue-mid" {...register('isFeatured')} />
-                  <label htmlFor="isFeatured" className="text-sm font-medium text-navy cursor-pointer">
-                    Feature this listing on the Home Page
-                  </label>
                 </div>
 
                 {/* Allow Agents to Acquire / Represent This Project / Property */}
