@@ -9,10 +9,11 @@ import { formatPhoneNumber, formatTitleCase, formatCode, sanitizeInput, isValidI
 import { INDIAN_STATES } from '../../utils/indianStates';
 import RoleManagementSection from '../../components/dashboard/RoleManagementSection';
 import SecuritySettingsSection from '../../components/dashboard/SecuritySettingsSection';
+import ApprovedVerificationDocumentsSection from '../../components/dashboard/ApprovedVerificationDocumentsSection';
 import './BuilderDashboard.css';
 
 const AgentProfile = () => {
-  const { user, updateProfile, deleteAccount, logout, showToast } = useAuth();
+  const { user, updateProfile, deleteAccount, logout, showToast, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -312,6 +313,16 @@ const AgentProfile = () => {
           <div style={{ marginBottom: '24px' }}>
             <RoleManagementSection />
           </div>
+
+          {/* Mandatory Listing Access Verification Documents (PAN, Aadhar, Agency Doc approved by Admin) */}
+          <ApprovedVerificationDocumentsSection
+            user={user}
+            defaultRole="agent"
+            showToast={showToast}
+            onKycUpdated={() => {
+              if (refreshUser) refreshUser();
+            }}
+          />
 
           {/* Security & Account Verification */}
           <div style={{ marginBottom: '24px' }}>

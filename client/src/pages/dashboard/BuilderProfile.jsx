@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { INDIAN_STATES } from '../../utils/indianStates';
 import RoleManagementSection from '../../components/dashboard/RoleManagementSection';
 import SecuritySettingsSection from '../../components/dashboard/SecuritySettingsSection';
+import ApprovedVerificationDocumentsSection from '../../components/dashboard/ApprovedVerificationDocumentsSection';
 import { formatPhoneNumber, formatTitleCase, formatCode, sanitizeInput, isValidIndianMobile } from '../../utils/formatters';
 import { uploadImage, getMyProperties, getMyInquiries } from '../../services/propertyService';
 import { getBuilderPartnerships } from '../../services/partnershipService';
@@ -29,7 +30,7 @@ import './BuilderDashboard.css';
 import './BuilderProfile.css';
 
 const BuilderProfile = () => {
-  const { user, deleteAccount, updateProfile, showToast, logout } = useAuth();
+  const { user, deleteAccount, updateProfile, showToast, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('company');
   const [saving, setSaving] = useState(false);
@@ -598,9 +599,19 @@ const BuilderProfile = () => {
           {/* ========== DOCUMENTS ========== */}
           {activeTab === 'documents' && (
             <div className="tab-panel active">
+              {/* Mandatory Listing Access Verification Documents (PAN, Aadhar, Company Doc approved by Admin) */}
+              <ApprovedVerificationDocumentsSection
+                user={user}
+                defaultRole="builder"
+                showToast={showToast}
+                onKycUpdated={() => {
+                  if (refreshUser) refreshUser();
+                }}
+              />
+
               <div className="form-card">
-                <div className="form-card-title">Verification Documents</div>
-                <div className="form-card-desc">Upload documents for account verification. Verified builders get a trust badge on listings.</div>
+                <div className="form-card-title">Company Media &amp; Brochures</div>
+                <div className="form-card-desc">Upload company brochures, certificates, and portfolio files to display on your builder profile.</div>
 
                 {/* Hidden file input for uploading or replacing */}
                 <input

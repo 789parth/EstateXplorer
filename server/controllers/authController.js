@@ -644,6 +644,11 @@ exports.getMe = async (req, res, next) => {
         agentProfile: user.agentProfile,
         ownerProfile: user.ownerProfile,
         kycVerification: user.kycVerification || { status: 'unverified' },
+        roleKycVerification: user.roleKycVerification || {
+          builder: { status: 'unverified' },
+          agent: { status: 'unverified' },
+          owner: { status: 'unverified' },
+        },
         createdAt: user.createdAt,
       },
     });
@@ -997,6 +1002,12 @@ exports.updateProfile = async (req, res, next) => {
         builderProfile: user.builderProfile,
         agentProfile: user.agentProfile,
         ownerProfile: user.ownerProfile,
+        kycVerification: user.kycVerification || { status: 'unverified' },
+        roleKycVerification: user.roleKycVerification || {
+          builder: { status: 'unverified' },
+          agent: { status: 'unverified' },
+          owner: { status: 'unverified' },
+        },
         createdAt: user.createdAt,
       },
     });

@@ -9,11 +9,12 @@ import { formatPhoneNumber, formatPrice, formatTitleCase, isValidIndianMobile } 
 import { Heart, X, ExternalLink, Building2, MapPin, MessageSquare, Calendar, ShieldCheck, Clock, Shield, Users, UserCheck } from 'lucide-react';
 import RoleManagementSection from '../../components/dashboard/RoleManagementSection';
 import SecuritySettingsSection from '../../components/dashboard/SecuritySettingsSection';
+import ApprovedVerificationDocumentsSection from '../../components/dashboard/ApprovedVerificationDocumentsSection';
 import './BuyerDashboard.css'; // Shared CSS
 
 
 const BuyerProfile = () => {
-  const { user, updateProfile, deleteAccount, showToast, logout } = useAuth();
+  const { user, updateProfile, deleteAccount, showToast, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [saving, setSaving] = useState(false);
   const [savedProperties, setSavedProperties] = useState([]);
@@ -474,6 +475,15 @@ const BuyerProfile = () => {
 
           {/* Role Selection & Switching */}
           <RoleManagementSection />
+
+          {/* Mandatory Listing Access Verification Documents (PAN, Aadhar approved by Admin) */}
+          <ApprovedVerificationDocumentsSection
+            user={user}
+            showToast={showToast}
+            onKycUpdated={() => {
+              if (refreshUser) refreshUser();
+            }}
+          />
 
           {/* Security & Account Verification */}
           <div style={{ marginTop: '24px', marginBottom: '24px' }}>
