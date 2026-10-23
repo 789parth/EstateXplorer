@@ -9,17 +9,10 @@ let cachedTransporter = null;
  */
 const sendViaBrevo = async (options) => {
   const brevoApiKey = (process.env.BREVO_API_KEY || '').trim();
-  const rawSender = (process.env.EMAIL_FROM || process.env.SMTP_USER || 'parthadthakkar@gmail.com').trim();
 
-  let senderName = 'EstateXplorer';
-  let senderEmail = rawSender;
-  if (rawSender.includes('<') && rawSender.includes('>')) {
-    senderName = rawSender.split('<')[0].replace(/"/g, '').trim() || 'EstateXplorer';
-    senderEmail = rawSender.split('<')[1].replace('>', '').trim();
-  }
-  if (!senderEmail || !senderEmail.includes('@')) {
-    senderEmail = 'parthadthakkar@gmail.com';
-  }
+  // Brevo strictly requires sending from an active verified sender on the Brevo account
+  const senderEmail = (process.env.BREVO_SENDER_EMAIL || 'parthadthakkar@gmail.com').trim();
+  const senderName = (process.env.EMAIL_FROM_NAME || 'EstateXplorer').trim();
 
   const payload = JSON.stringify({
     sender: {
