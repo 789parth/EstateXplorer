@@ -3,46 +3,93 @@ const nodemailer = require('nodemailer');
 let cachedTransporter = null;
 
 /**
- * Creates or reuses a Nodemailer transport instance.
- * Optimized with connection pooling to eliminate cold-start TLS latency on Vercel.
+ * Creates or reuses a resilient Nodemailer transport instance.
+ * Automatically supports Gmail Service shortcut or standard SMTP hosts (465/587).
+ * Cleans whitespace from user/password to prevent cloud copy-paste failures.
  */
 const getTransporter = async () => {
-  const isMockCredential =
-    !process.env.SMTP_USER ||
-    process.env.SMTP_USER === 'mock_user@ethereal.email' ||
-    process.env.SMTP_USER === 'your-email@gmail.com' ||
-    process.env.SMTP_PASS === 'mock_pass' ||
-    process.env.SMTP_PASS === 'your-app-password-here';
+  const rawUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
+  const rawPass = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim() : '';
+  const rawHost = process.env.SMTP_HOST ? process.env.SMTP_HOST.trim() : '';
+  const cleanPass = rawPass.replace(/\s+/g, '');
 
-  if (process.env.SMTP_HOST && !isMockCredential) {
+  const isMockCredential =
+    !rawUser ||
+    rawUser === 'mock_user@ethereal.email' ||
+    rawUser === 'your-email@gmail.com' ||
+    cleanPass === 'mock_pass' ||
+    cleanPass === 'your-app-password-here';
+
+  if (!isMockCredential && (rawHost || rawUser.endsWith('@gmail.com'))) {
     if (cachedTransporter) return { transporter: cachedTransporter, isTestAccount: false };
 
-    const port = parseInt(process.env.SMTP_PORT, 10) || 587;
+    const isGmail = rawHost.includes('gmail.com') || rawUser.endsWith('@gmail.com');
+    const port = parseInt(process.env.SMTP_PORT, 10) || (isGmail ? 465 : 587);
     const isSecure = port === 465;
 
-    cachedTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: port,
-      secure: isSecure,
-      pool: true, // Use pooled connections for high-speed dispatch
-      maxConnections: 5,
-      maxMessages: 100,
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 5000,
-      socketTimeout: 15000,
-    });
+    let transportConfig;
 
-    return { transporter: cachedTransporter, isTestAccount: false };
+    if (isGmail) {
+      // Use direct Gmail predefined service configuration - highest reliability on cloud providers
+      transportConfig = {
+        service: 'gmail',
+        auth: {
+          user: rawUser,
+          pass: cleanPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
+      };
+    } else {
+      transportConfig = {
+        host: rawHost,
+        port: port,
+        secure: isSecure,
+        auth: {
+          user: rawUser,
+          pass: cleanPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
+      };
+    }
+
+    try {
+      cachedTransporter = nodemailer.createTransport(transportConfig);
+      await cachedTransporter.verify();
+      console.log('✅ Mail transport connected successfully via', isGmail ? 'Gmail Service' : `${rawHost}:${port}`);
+      return { transporter: cachedTransporter, isTestAccount: false };
+    } catch (verifyErr) {
+      console.warn('Primary transport verification failed, falling back to direct host transport:', verifyErr.message);
+      // Fallback to explicit SSL port 465
+      cachedTransporter = nodemailer.createTransport({
+        host: rawHost || 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: {
+          user: rawUser,
+          pass: cleanPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeout: 15000,
+        socketTimeout: 20000,
+      });
+      return { transporter: cachedTransporter, isTestAccount: false };
+    }
   }
 
   // Development fallback: Ethereal test mail
+  console.log('ℹ️ Using Ethereal test account for email delivery...');
   const testAccount = await nodemailer.createTestAccount();
   const testTransporter = nodemailer.createTransport({
     host: 'smtp.ethereal.email',
@@ -59,9 +106,10 @@ const getTransporter = async () => {
 
 const sendEmail = async (options) => {
   const { transporter, isTestAccount } = await getTransporter();
+  const rawUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
 
   const message = {
-    from: process.env.EMAIL_FROM || `EstateXplorer <${process.env.SMTP_USER || 'noreply@estatexplorer.com'}>`,
+    from: process.env.EMAIL_FROM || `EstateXplorer <${rawUser || 'noreply@estatexplorer.com'}>`,
     to: options.email,
     subject: options.subject,
     text: options.message,
