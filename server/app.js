@@ -14,10 +14,9 @@ const errorMiddleware = require('./middleware/errorMiddleware');
 dotenv.config();
 
 const app = express();
-const configuredProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '0', 10);
-if (Number.isInteger(configuredProxyHops) && configuredProxyHops >= 0 && configuredProxyHops <= 10) {
-  app.set('trust proxy', configuredProxyHops);
-}
+// In Vercel serverless environment, trust proxy 1 hop so client IPs and rate limiters evaluate real visitor IP
+const configuredProxyHops = process.env.TRUST_PROXY_HOPS !== undefined ? Number.parseInt(process.env.TRUST_PROXY_HOPS, 10) : 1;
+app.set('trust proxy', Number.isNaN(configuredProxyHops) ? 1 : configuredProxyHops);
 
 // High-speed response compression (Gzip / Deflate)
 app.use(compression({
