@@ -2066,9 +2066,21 @@ const AgentDashboard = () => {
                                   <span>Offered Commission</span>
                                 </span>
                                 <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-[11px]">
-                                  {item.commissionAmount > 0
-                                    ? `₹ ${Number(item.commissionAmount).toLocaleString('en-IN')}`
-                                    : (item.defaultCommissionRate ? `${item.defaultCommissionRate}%` : 'Upon Discussion')}
+                                  {(() => {
+                                    const rate = item.defaultCommissionRate || item.commissionRate;
+                                    const price = Number(item.price) || 0;
+                                    if (rate > 0 && price > 0) {
+                                      const amount = Math.round((price * rate) / 100);
+                                      return `${rate}% (₹ ${amount.toLocaleString('en-IN')})`;
+                                    }
+                                    if (rate > 0) {
+                                      return `${rate}%`;
+                                    }
+                                    if (item.commissionAmount > 0) {
+                                      return `₹ ${Number(item.commissionAmount).toLocaleString('en-IN')}`;
+                                    }
+                                    return 'Upon Discussion';
+                                  })()}
                                 </span>
                               </div>
                             </div>
@@ -2100,11 +2112,19 @@ const AgentDashboard = () => {
                                 <span>Requested</span>
                               </button>
                             ) : isRejected ? (
-                              <div className="flex items-center gap-2">
+                              <div className="space-y-1.5">
+                                <div className="p-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+                                  <div className="font-bold flex items-center gap-1 text-[11px] text-rose-700">
+                                    <X size={12} /> Request Rejected by Seller
+                                  </div>
+                                  <div className="text-[11px] text-rose-600 mt-0.5">
+                                    {item.partnershipDetails?.rejectionReason || 'Seller did not provide additional comments.'}
+                                  </div>
+                                </div>
                                 <button
                                   type="button"
                                   onClick={() => setRequestModalProject(item)}
-                                  className="flex-1 py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer transition-colors"
+                                  className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs cursor-pointer transition-colors"
                                 >
                                   <ShieldCheck size={13} />
                                   <span>Apply Again</span>
@@ -2313,50 +2333,31 @@ const AgentDashboard = () => {
                             </div>
                           </div>
 
-                          {/* Right: Referral Link or Status CTA */}
-                          <div className="md:w-96 shrink-0 space-y-2">
+                          {/* Right: Actions */}
+                          <div className="md:w-72 shrink-0 space-y-2">
                             {isApproved ? (
-                              <div className="space-y-1.5">
-                                <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
-                                  <span>Client Referral Tracking Link:</span>
-                                  <span className="text-[10px] text-emerald-700 font-semibold">Active &amp; Attributed</span>
-                                </label>
-                                <div className="flex items-center gap-1.5 bg-slate-50 p-1 pl-2.5 rounded-xl border border-slate-300">
-                                  <input
-                                    type="text"
-                                    readOnly
-                                    value={affiliateUrl}
-                                    className="w-full bg-transparent text-[11px] font-mono text-slate-800 truncate select-all outline-hidden"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleCopyLink(affiliateCode, affiliateUrl, item._id)}
-                                    className={`shrink-0 py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${copiedLinkMap[item._id]
-                                      ? 'bg-emerald-600 text-white'
-                                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                                      }`}
-                                  >
-                                    {copiedLinkMap[item._id] ? <Check size={12} /> : <Copy size={12} />}
-                                    <span>{copiedLinkMap[item._id] ? 'Copied!' : 'Copy Link'}</span>
-                                  </button>
-                                </div>
-                                <div className="flex items-center justify-between pt-0.5">
+                              <div className="space-y-2 bg-emerald-50/60 p-3 rounded-xl border border-emerald-200/80">
+                                <div className="flex items-center justify-between">
+                                  <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800">
+                                    <CheckCircle2 size={13} className="text-emerald-600" />
+                                    <span>Affiliated Agent</span>
+                                  </span>
                                   <a
-                                    href={affiliateUrl}
+                                    href={`/property/${project._id}`}
                                     target="_blank"
                                     rel="noreferrer"
                                     className="text-[11px] font-bold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1"
                                   >
-                                    <span>Open {isProject ? 'Project' : 'Property'} Page</span>
+                                    <span>View Listing</span>
                                     <ExternalLink size={11} />
                                   </a>
-                                  <span className="text-[10px] text-slate-400">
-                                    30-Day First-Touch Lock
-                                  </span>
                                 </div>
+                                <p className="text-[11px] text-slate-500">
+                                  You are actively representing this listing. Buyer inquiries from the website are routed directly to you.
+                                </p>
 
                                 {/* Leave Project / Property Button (Phase 5) */}
-                                <div className="pt-2 border-t border-slate-200/70 flex justify-end">
+                                <div className="pt-2 border-t border-emerald-200/60 flex justify-end">
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -2378,7 +2379,7 @@ const AgentDashboard = () => {
                                   <span>Application Pending Review</span>
                                 </div>
                                 <p className="text-[11px] text-amber-800 leading-relaxed">
-                                  The seller has been notified. As soon as they accept your request, your unique tracking URL will activate here.
+                                  The seller has been notified. As soon as they accept your request, your selling rights will activate here.
                                 </p>
                               </div>
                             ) : (

@@ -1196,7 +1196,7 @@ const AdminDashboard = () => {
 
                       return (
                         <div
-                          key={item._id}
+                          key={`${item._id}-${item.role || item.targetRole || 'kyc'}`}
                           className="p-4 border border-slate-200 rounded-xl bg-white shadow-xs hover:border-slate-300 transition-all text-left"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-slate-100">

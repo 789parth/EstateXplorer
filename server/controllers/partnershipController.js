@@ -40,7 +40,7 @@ exports.discoverProjects = async (req, res) => {
         .limit(limit)
         .lean(),
       Partnership.find({ agent: req.user._id })
-        .select('project status agentCode commissionRate')
+        .select('project status agentCode commissionRate rejectionReason proposalNotes')
         .lean(),
     ]);
 
@@ -51,6 +51,8 @@ exports.discoverProjects = async (req, res) => {
         status: p.status,
         agentCode: p.agentCode,
         commissionRate: p.commissionRate,
+        rejectionReason: p.rejectionReason,
+        proposalNotes: p.proposalNotes,
       };
     });
 

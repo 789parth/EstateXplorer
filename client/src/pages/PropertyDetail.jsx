@@ -37,7 +37,7 @@ import Footer from '../components/layout/Footer';
 import Modal from '../components/common/Modal';
 import ShareModal from '../components/common/ShareModal';
 import EmailVerificationModal from '../components/common/EmailVerificationModal';
-import { formatPrice, formatPhoneNumber, formatTitleCase, getPublicImageUrl, isVideoUrl, isValidIndianMobile } from '../utils/formatters';
+import { formatPrice, formatPhoneNumber, formatTitleCase, getPublicImageUrl, isVideoUrl, isValidIndianMobile, calculateBuyerEffectivePrice } from '../utils/formatters';
 import './PropertyDetail.css';
 
 // Auth forms — only shown in modals, lazy-load to keep PropertyDetail initial bundle lean
@@ -285,7 +285,7 @@ const PropertyDetail = () => {
 
   useEffect(() => {
     if (user) {
-      setForm(f => ({ ...f, name: user.name || '', email: user.email || '' }));
+      setForm(f => ({ ...f, name: user.name || '', email: user.email || '', phone: user.phone || f.phone || '' }));
       getUserWishlist()
         .then(res => {
           if (res.success && Array.isArray(res.data)) {
@@ -964,14 +964,30 @@ const PropertyDetail = () => {
               </p>
 
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-xl sm:text-2xl font-bold text-blue-600">
-                    {formatPrice(property.price, property.priceDisplay, property.purpose)}
-                  </span>
-                  {property.purpose === 'rent' && (
-                    <span className="text-xs text-slate-500">/ month</span>
-                  )}
-                </div>
+                {(() => {
+                  const { effectivePrice, commissionAdded, isAgentAttributed } = calculateBuyerEffectivePrice(property);
+                  const displayPrice = isAgentAttributed ? effectivePrice : property.price;
+
+                  return (
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-xl sm:text-2xl font-bold text-blue-600">
+                          {formatPrice(displayPrice, isAgentAttributed ? undefined : property.priceDisplay, property.purpose)}
+                        </span>
+                        {property.purpose === 'rent' && (
+                          <span className="text-xs text-slate-500">/ month</span>
+                        )}
+                      </div>
+                      {isAgentAttributed && commissionAdded > 0 && (
+                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                          <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded font-medium border border-blue-100">
+                            Inclusive of Agent Representation ({property.defaultCommissionRate || 2.5}%)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="flex items-center gap-2 flex-wrap">
                   {(property.priceSub || (property.price > 0 && property.area > 0 ? `₹ ${Math.round(property.price / property.area).toLocaleString('en-IN')} / Sq.Ft` : '')) && (

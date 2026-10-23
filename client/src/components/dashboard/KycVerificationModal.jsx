@@ -452,10 +452,14 @@ const KycVerificationModal = ({
               type="submit"
               variant="primary"
               isLoading={submitting}
-              disabled={submitting || !aadharUrl || !panUrl}
-              className="text-xs px-5 py-2 font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={submitting || currentStatus === 'pending' || !aadharUrl || !panUrl}
+              className="text-xs px-5 py-2 font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Submit Documents for Admin Verification
+              {currentStatus === 'pending'
+                ? 'Under Admin Review (Submission Locked)'
+                : currentStatus === 'rejected'
+                ? 'Re-submit Documents for Review'
+                : 'Submit Documents for Admin Verification'}
             </Button>
           </div>
         </form>

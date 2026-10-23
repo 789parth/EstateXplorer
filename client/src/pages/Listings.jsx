@@ -8,7 +8,7 @@ import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import Modal from '../components/common/Modal';
 import ShareModal from '../components/common/ShareModal';
-import { formatPrice, getPublicImageUrl, isVideoUrl } from '../utils/formatters';
+import { formatPrice, getPublicImageUrl, isVideoUrl, calculateBuyerEffectivePrice } from '../utils/formatters';
 import './Listings.css';
 
 // Auth forms only appear in modals — lazy-load to keep Listings initial bundle lean
@@ -85,7 +85,14 @@ const mapListingProperty = (p) => {
     description: p.description || '',
     area: p.area || 0,
     createdAt: p.createdAt,
-    price: p.price,
+    price: (() => {
+      const { effectivePrice, isAgentAttributed } = calculateBuyerEffectivePrice(p);
+      return isAgentAttributed ? effectivePrice : p.price;
+    })(),
+    rawPrice: p.price,
+    assignedAgent: p.assignedAgent,
+    defaultCommissionRate: p.defaultCommissionRate,
+    commissionAmount: p.commissionAmount,
     purpose: p.purpose || 'buy',
     bhk: p.bhk || 0,
     status: p.status,
@@ -94,7 +101,10 @@ const mapListingProperty = (p) => {
     category: p.category || 'property',
     location: locStr,
     city: typeof p.location === 'object' ? p.location?.city : '',
-    priceDisplay: formatPrice(p.price, p.priceDisplay, p.purpose),
+    priceDisplay: (() => {
+      const { effectivePrice, isAgentAttributed } = calculateBuyerEffectivePrice(p);
+      return isAgentAttributed ? formatPrice(effectivePrice, undefined, p.purpose) : formatPrice(p.price, p.priceDisplay, p.purpose);
+    })(),
     priceSub: p.priceSub || (p.price > 0 && p.area > 0 ? `₹ ${Math.round(p.price / p.area).toLocaleString('en-IN')} / Sq.Ft` : ''),
     photos: photoCount,
     videos: videoCount,

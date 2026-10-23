@@ -30,6 +30,8 @@ import {
   UserCheck,
   UserX,
   AlertTriangle,
+  AlertCircle,
+  XCircle,
   Copy,
   Bell,
   Globe,
@@ -1588,6 +1590,164 @@ const BuilderDashboard = () => {
                   </button>
                 </div>
               </div>
+              {/* Graphical KYC Verification Status & Progress Banner */}
+              {(() => {
+                const bKyc = user?.roleKycVerification?.builder;
+                const fKyc = user?.kycVerification?.roleAtSubmission === 'builder' ? user?.kycVerification : null;
+                const kycObj = bKyc || fKyc || {};
+                const st = bKyc?.status || fKyc?.status || 'unverified';
+
+                if (st === 'verified') {
+                  return (
+                    <div className="mb-5 p-4 rounded-xl border border-emerald-200 bg-emerald-50/70 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
+                            <ShieldCheck size={22} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-emerald-950">Builder Verification Approved</h4>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
+                                <CheckCircle2 size={12} /> Verified
+                              </span>
+                            </div>
+                            <p className="text-xs text-emerald-800/90 mt-0.5">
+                              Your documents have been verified by Admin. You have full authorization to create, publish, and manage project developments.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-emerald-800">
+                          <Link
+                            to="/builder/profile"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline"
+                          >
+                            <ExternalLink size={12} /> View Documents
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (st === 'pending') {
+                  return (
+                    <div className="mb-5 p-4 rounded-xl border border-amber-200 bg-amber-50/80 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                            <Clock size={22} className="animate-pulse" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-amber-950">Verification Under Admin Review</h4>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                <Clock size={12} /> In Progress
+                              </span>
+                            </div>
+                            <p className="text-xs text-amber-800 mt-0.5">
+                              Your builder verification documents have been submitted and are currently awaiting Administrator approval. You will receive listing rights once verified.
+                            </p>
+                            {/* Graphical Step Progress */}
+                            <div className="mt-3 flex items-center gap-2 text-[11px] font-semibold text-amber-900">
+                              <span className="flex items-center gap-1 text-emerald-700">
+                                <CheckCircle2 size={13} /> 1. Uploaded
+                              </span>
+                              <span className="text-amber-400">→</span>
+                              <span className="flex items-center gap-1 text-amber-700 font-bold bg-amber-100 px-2 py-0.5 rounded-md">
+                                <Clock size={13} /> 2. Admin Reviewing
+                              </span>
+                              <span className="text-amber-400">→</span>
+                              <span className="text-slate-400">3. Publishing Active</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowKycModal(true)}
+                            className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition-colors cursor-pointer shadow-2xs"
+                          >
+                            View Submission
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (st === 'rejected') {
+                  return (
+                    <div className="mb-5 p-4 rounded-xl border border-rose-200 bg-rose-50/80 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 mt-0.5">
+                            <XCircle size={22} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-rose-950">Verification Rejected by Administrator</h4>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                <AlertCircle size={12} /> Action Required
+                              </span>
+                            </div>
+                            {kycObj.rejectionReason && (
+                              <div className="mt-2 p-2.5 rounded-lg bg-white/80 border border-rose-200 text-xs text-rose-900">
+                                <span className="font-bold">Reason:</span> {kycObj.rejectionReason}
+                              </div>
+                            )}
+                            <p className="text-xs text-rose-800 mt-2">
+                              Please review the feedback above and re-upload valid verification documents to unlock project and property creation.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="shrink-0 mt-1 sm:mt-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowKycModal(true)}
+                            className="px-4 py-2 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-700 text-white transition-colors cursor-pointer shadow-2xs"
+                          >
+                            Re-upload Documents
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Default: Unverified (Documents Not Yet Uploaded)
+                return (
+                  <div className="mb-5 p-4 rounded-xl border border-blue-200 bg-blue-50/60 shadow-2xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5">
+                          <ShieldCheck size={22} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-blue-950">Verification Required to List Projects</h4>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800">
+                              Mandatory
+                            </span>
+                          </div>
+                          <p className="text-xs text-blue-800 mt-0.5">
+                            Upload your PAN, Aadhar, and optional Company documents to gain listing access and manage your property developments.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowKycModal(true)}
+                          className="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer shadow-2xs"
+                        >
+                          Submit Documents
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Sub-Tab 1: PROJECTS */}
               {listingsSubTab === 'projects' && (
@@ -2433,9 +2593,9 @@ const BuilderDashboard = () => {
                         <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                           <th className="py-3 px-4">Agent Name &amp; Details</th>
                           <th className="py-3 px-4">Project Applied For</th>
+                          <th className="py-3 px-4">Agent Message</th>
                           <th className="py-3 px-4">Date of Request</th>
                           <th className="py-3 px-4">Current Status</th>
-                          <th className="py-3 px-4">Affiliate Referral Link</th>
                           <th className="py-3 px-4 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -2504,6 +2664,17 @@ const BuilderDashboard = () => {
                                 </div>
                               </td>
 
+                              {/* Agent Message */}
+                              <td className="py-3.5 px-4 max-w-[240px]">
+                                {req.proposalNotes ? (
+                                  <div className="text-slate-700 bg-slate-50 p-2 rounded-lg border border-slate-200/80 text-xs italic line-clamp-2" title={req.proposalNotes}>
+                                    &ldquo;{req.proposalNotes}&rdquo;
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 italic">No message provided</span>
+                                )}
+                              </td>
+
                               {/* Date */}
                               <td className="py-3.5 px-4 whitespace-nowrap">
                                 <div className="text-slate-900 font-medium">
@@ -2525,38 +2696,16 @@ const BuilderDashboard = () => {
                                     <CheckCircle2 size={11} /> Accepted / Affiliated
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-800 border border-rose-300">
-                                    <X size={11} /> Rejected
-                                  </span>
-                                )}
-                              </td>
-
-                              {/* Referral Link (Active upon approval) */}
-                              <td className="py-3.5 px-4">
-                                {isApproved ? (
-                                  <div className="flex items-center gap-1 max-w-[220px]">
-                                    <input
-                                      type="text"
-                                      readOnly
-                                      value={affiliateUrl}
-                                      className="text-[11px] bg-slate-50 border border-slate-200 rounded px-2 py-1 font-mono truncate text-slate-700 w-full"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCopyLink(affiliateCode, affiliateUrl, req._id)}
-                                      className={`shrink-0 p-1.5 rounded border transition-all cursor-pointer ${copiedLinkMap[req._id]
-                                        ? 'bg-emerald-600 text-white border-emerald-600'
-                                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
-                                        }`}
-                                      title="Copy unique agent referral link"
-                                    >
-                                      {copiedLinkMap[req._id] ? <Check size={12} /> : <Copy size={12} />}
-                                    </button>
+                                  <div>
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-800 border border-rose-300">
+                                      <X size={11} /> Rejected
+                                    </span>
+                                    {req.rejectionReason && (
+                                      <div className="text-[10px] text-rose-600 mt-1 max-w-[180px] truncate" title={req.rejectionReason}>
+                                        Reason: {req.rejectionReason}
+                                      </div>
+                                    )}
                                   </div>
-                                ) : (
-                                  <span className="text-[11px] text-slate-400 italic">
-                                    {isPending ? 'Activates on approval' : 'Not active'}
-                                  </span>
                                 )}
                               </td>
 
@@ -3303,7 +3452,7 @@ const BuilderDashboard = () => {
 
             <div className="mb-4">
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Reason for Rejection (Optional — helpful for the agent)
+                Reason for Rejection <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
               </label>
               <textarea
                 rows={3}
@@ -3327,9 +3476,9 @@ const BuilderDashboard = () => {
               </button>
               <button
                 type="button"
-                disabled={actionPartnershipId === rejectReasonModal._id}
+                disabled={actionPartnershipId === rejectReasonModal._id || !rejectionReasonText.trim()}
                 onClick={() => handleRejectPartnership(rejectReasonModal._id, rejectionReasonText)}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-colors flex items-center gap-1"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-colors flex items-center gap-1 disabled:opacity-50"
               >
                 <X size={13} />
                 <span>{actionPartnershipId === rejectReasonModal._id ? 'Rejecting...' : 'Confirm Reject'}</span>

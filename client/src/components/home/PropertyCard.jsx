@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Heart, CheckCircle2, MapPin, Share2 } from 'lucide-react';
 import Button from '../common/Button';
 import ShareModal from '../common/ShareModal';
-import { formatPrice, getPublicImageUrl } from '../../utils/formatters';
+import { formatPrice, getPublicImageUrl, calculateBuyerEffectivePrice } from '../../utils/formatters';
 
 const PropertyCard = ({ property, onBookVisit, isBooked = false }) => {
   const [shareOpen, setShareOpen] = useState(false);
@@ -132,10 +132,19 @@ const PropertyCard = ({ property, onBookVisit, isBooked = false }) => {
           {/* Pricing Row */}
           <div className="flex items-center justify-between mb-3.5 bg-slate-50/90 p-2.5 rounded-xl border border-slate-100/90 gap-2">
             <div className="min-w-0">
-              <span className="text-[0.65rem] text-slate-400 font-semibold block uppercase tracking-wider">Starting from</span>
-              <span className="text-[1.05rem] font-bold text-slate-900 tabular-nums tracking-tight whitespace-nowrap">
-                {formatPrice(property.price, property.priceDisplay || property.price)}
-              </span>
+              {(() => {
+                const { effectivePrice, isAgentAttributed } = calculateBuyerEffectivePrice(property);
+                const displayPrice = isAgentAttributed ? effectivePrice : property.price;
+
+                return (
+                  <>
+                    <span className="text-[0.65rem] text-slate-400 font-semibold block uppercase tracking-wider">Starting from</span>
+                    <span className="text-[1.05rem] font-bold text-slate-900 tabular-nums tracking-tight whitespace-nowrap">
+                      {formatPrice(displayPrice, isAgentAttributed ? undefined : (property.priceDisplay || property.price))}
+                    </span>
+                  </>
+                );
+              })()}
             </div>
             {property.emi && (
               <div className="text-right min-w-0 flex-1 pl-2 border-l border-slate-200/60">

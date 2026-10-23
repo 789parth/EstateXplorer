@@ -141,7 +141,7 @@ const ApprovedVerificationDocumentsSection = ({
                 </div>
 
                 <div className="flex items-center gap-2 self-start sm:self-auto">
-                  {(!isVerified || isRejected) && (
+                  {(!isVerified || isRejected) ? (
                     <button
                       type="button"
                       onClick={() => setActiveKycModalRole(roleCfg.key)}
@@ -150,7 +150,16 @@ const ApprovedVerificationDocumentsSection = ({
                       <UploadCloud size={14} />
                       {isRejected ? 'Re-upload Documents' : isPending ? 'Update Documents' : 'Upload Documents'}
                     </button>
-                  )}
+                  ) : ((roleCfg.key === 'builder' && !hasCompanyDoc) || (roleCfg.key === 'agent' && !hasAgencyDoc)) ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveKycModalRole(roleCfg.key)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <UploadCloud size={14} />
+                      Upload Optional Document
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

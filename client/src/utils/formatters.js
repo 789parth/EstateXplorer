@@ -262,3 +262,36 @@ export const isVideoUrl = (url) => {
     lower.startsWith('data:video/')
   );
 };
+
+
+/**
+ * Calculates effective buyer price including agent commission when an agent is assigned.
+ * If property has an assigned agent and commission is configured, it adds the commission
+ * to the base price for the buyer-facing display.
+ */
+export const calculateBuyerEffectivePrice = (property) => {
+  if (!property) return { effectivePrice: 0, commissionAdded: 0, isAgentAttributed: false };
+  const basePrice = typeof property.price === 'number' ? property.price : parseFloat(property.price) || 0;
+  const hasAgent = Boolean(property.assignedAgent);
+
+  if (!hasAgent || basePrice <= 0) {
+    return {
+      effectivePrice: basePrice,
+      commissionAdded: 0,
+      isAgentAttributed: false,
+    };
+  }
+
+  let commissionAmt = 0;
+  if (property.commissionAmount && typeof property.commissionAmount === 'number' && property.commissionAmount > 0) {
+    commissionAmt = property.commissionAmount;
+  } else if (property.defaultCommissionRate && property.defaultCommissionRate > 0) {
+    commissionAmt = Math.round((basePrice * property.defaultCommissionRate) / 100);
+  }
+
+  return {
+    effectivePrice: basePrice + commissionAmt,
+    commissionAdded: commissionAmt,
+    isAgentAttributed: true,
+  };
+};

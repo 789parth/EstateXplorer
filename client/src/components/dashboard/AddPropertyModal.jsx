@@ -54,6 +54,15 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
     }
   }, [watchedRera, setValue, clearErrors, trigger]);
 
+  React.useEffect(() => {
+    if (!watchedAllowAgent) {
+      setValue('defaultCommissionRate', '');
+      clearErrors('defaultCommissionRate');
+    } else {
+      trigger('defaultCommissionRate');
+    }
+  }, [watchedAllowAgent, setValue, clearErrors, trigger]);
+
   const computedDisplayPrice = React.useMemo(() => {
     if (!watchedPrice || Number(watchedPrice) <= 0) return '';
     return formatPrice(Number(watchedPrice), null, watchedPurpose || 'buy');
@@ -108,7 +117,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         uspsString: initialData.usps ? initialData.usps.join(', ') : '',
         amenitiesString: initialData.amenities ? initialData.amenities.join(', ') : '',
         allowAgentAcquisition: Boolean(initialData.allowAgentAcquisition ?? initialData.networkEnabled),
-        commissionAmount: initialData.commissionAmount || '',
+        defaultCommissionRate: initialData.defaultCommissionRate ?? '',
       });
       setImages(initialData.images && initialData.images.length > 0 ? initialData.images : ['']);
     } else if (isOpen) {
@@ -132,7 +141,7 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         uspsString: '',
         amenitiesString: '',
         allowAgentAcquisition: false,
-        commissionAmount: '',
+        defaultCommissionRate: '',
       });
       setImages(['']);
     }
@@ -203,7 +212,8 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
         reraId: data.rera ? formatCode(data.reraId) : '',
         allowAgentAcquisition: Boolean(data.allowAgentAcquisition),
         networkEnabled: Boolean(data.allowAgentAcquisition),
-        commissionAmount: data.allowAgentAcquisition && data.commissionAmount ? Number(data.commissionAmount) : 0,
+        defaultCommissionRate: data.allowAgentAcquisition && data.defaultCommissionRate ? Number(data.defaultCommissionRate) : 0,
+        commissionAmount: 0,
       };
 
       let res;
@@ -743,24 +753,40 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
 
                   {watchedAllowAgent && (
                     <div className="pt-2.5 border-t border-emerald-200/60 mt-1">
-                      <label htmlFor="commissionAmount" className="block text-xs font-bold text-slate-800 mb-1">
-                        Commission Amount (₹)
+                      <label htmlFor="defaultCommissionRate" className="block text-xs font-bold text-slate-800 mb-1">
+                        Commission Percentage (%) <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
                       </label>
                       <div className="relative max-w-xs">
                         <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 font-bold text-xs">
-                          ₹
+                          %
                         </span>
                         <input
                           type="number"
-                          id="commissionAmount"
-                          placeholder="e.g. 50000"
-                          min="0"
-                          className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
-                          {...register('commissionAmount')}
+                          step="0.01"
+                          id="defaultCommissionRate"
+                          placeholder="e.g. 4"
+                          className={`w-full pl-8 pr-3 py-1.5 bg-white border rounded-lg text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 ${
+                            errors.defaultCommissionRate ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : 'border-slate-300 focus:border-emerald-600 focus:ring-emerald-600'
+                          }`}
+                          {...register('defaultCommissionRate', {
+                            validate: (val) => {
+                              if (!watchedAllowAgent) return true;
+                              if (val === '' || val === null || val === undefined) return 'Commission percentage is required when agent acquisition is enabled.';
+                              const num = Number(val);
+                              if (isNaN(num) || num <= 0) return 'Commission percentage must be greater than 0%.';
+                              if (num > 100) return 'Commission percentage cannot exceed 100%.';
+                              return true;
+                            },
+                          })}
                         />
                       </div>
+                      {errors.defaultCommissionRate && (
+                        <span className="text-[11px] text-red-600 font-medium block mt-1">
+                          {errors.defaultCommissionRate.message}
+                        </span>
+                      )}
                       <p className="text-[0.68rem] text-slate-500 mt-1">
-                        Enter the fixed or estimated commission amount offered to the affiliated agent for this {watchedCategory === 'project' ? 'project' : 'property'}.
+                        Enter the commission percentage offered to the affiliated agent for this {watchedCategory === 'project' ? 'project' : 'property'}.
                       </p>
                     </div>
                   )}

@@ -179,8 +179,19 @@ exports.createProperty = async (req, res, next) => {
     req.body.isFeatured = Boolean(req.body.isFeatured);
     if (!req.body.allowAgentAcquisition) {
       req.body.publishingStatus = 'published_direct';
+      req.body.defaultCommissionRate = 0;
+      req.body.commissionAmount = 0;
     } else {
       req.body.publishingStatus = 'open_for_agent';
+      const parsedRate = Number(req.body.defaultCommissionRate ?? req.body.commissionRate);
+      if (isNaN(parsedRate) || parsedRate <= 0) {
+        return next(new AppError('Commission percentage (%) is required and must be greater than 0% when agent representation is enabled.', 400));
+      }
+      if (parsedRate > 100) {
+        return next(new AppError('Commission percentage (%) cannot exceed 100%.', 400));
+      }
+      req.body.defaultCommissionRate = parsedRate;
+      req.body.commissionAmount = 0;
     }
 
     const property = await Property.create(req.body);
@@ -513,6 +524,17 @@ exports.updateProperty = async (req, res, next) => {
         req.body.publishingStatus = 'published_direct';
       } else if (req.body.allowAgentAcquisition && !property.assignedAgent) {
         req.body.publishingStatus = 'open_for_agent';
+        if (req.body.defaultCommissionRate !== undefined || req.body.commissionRate !== undefined) {
+          const parsedRate = Number(req.body.defaultCommissionRate ?? req.body.commissionRate);
+          if (isNaN(parsedRate) || parsedRate <= 0) {
+            return next(new AppError('Commission percentage (%) is required and must be greater than 0% when agent representation is enabled.', 400));
+          }
+          if (parsedRate > 100) {
+            return next(new AppError('Commission percentage (%) cannot exceed 100%.', 400));
+          }
+          req.body.defaultCommissionRate = parsedRate;
+          req.body.commissionAmount = 0;
+        }
       }
     }
 

@@ -349,6 +349,7 @@ async function getBuilderPartnerships(builderId, projectId = null) {
   return await Partnership.find(query)
     .populate('agent', 'name email phone reraNumber agencyName')
     .populate('project', 'title priceDisplay location category propertyType purpose bhk area allowAgentAcquisition networkEnabled images')
+    .select('builder agent project status leftAt leaveReason agentCode affiliateUrl commissionRate commissionType proposedCommission licenseInfo submittedDocuments proposalNotes rejectionReason approvedAt rejectedAt metrics createdAt updatedAt')
     .sort({ createdAt: -1 })
     .limit(300)
     .lean();
