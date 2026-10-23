@@ -279,6 +279,7 @@ exports.sendRegistrationOTP = async (req, res, next) => {
       });
     } catch (err) {
       console.error('Failed to send registration OTP email:', err.message);
+      global.__lastSmtpError = { message: err.message, code: err.code, response: err.response, time: new Date() };
       return next(new AppError('Failed to dispatch verification email. Please verify SMTP credentials or try again.', 500));
     }
 

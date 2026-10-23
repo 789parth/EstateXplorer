@@ -62,6 +62,7 @@ app.get('/api/health', (req, res) => {
       passLength: (process.env.SMTP_PASS || '').length,
       host: process.env.SMTP_HOST || 'not_set',
       port: process.env.SMTP_PORT || 'not_set',
+      lastSmtpError: global.__lastSmtpError || null,
     },
     time: new Date(),
   });

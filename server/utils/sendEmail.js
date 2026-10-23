@@ -69,6 +69,7 @@ const getTransporter = async () => {
       return { transporter: cachedTransporter, isTestAccount: false };
     } catch (verifyErr) {
       console.warn('Primary transport verification failed, falling back to direct host transport:', verifyErr.message);
+      global.__lastSmtpError = { phase: 'verify', message: verifyErr.message, code: verifyErr.code, response: verifyErr.response };
       // Fallback to explicit SSL port 465
       cachedTransporter = nodemailer.createTransport({
         host: rawHost || 'smtp.gmail.com',
