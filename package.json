@@ -26,5 +26,8 @@
     "build:server": "npm install",
     "client:install": "cd client && npm install",
     "client:build": "cd client && npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
