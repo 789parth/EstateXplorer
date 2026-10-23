@@ -1,47 +1,64 @@
 const nodemailer = require('nodemailer');
 
-const sendEmail = async (options) => {
-  let transporter;
-  let isTestAccount = false;
+let cachedTransporter = null;
 
-  const isMockCredential = 
-    !process.env.SMTP_USER || 
-    process.env.SMTP_USER === 'mock_user@ethereal.email' || 
+/**
+ * Creates or reuses a Nodemailer transport instance.
+ * Optimized with connection pooling to eliminate cold-start TLS latency on Vercel.
+ */
+const getTransporter = async () => {
+  const isMockCredential =
+    !process.env.SMTP_USER ||
+    process.env.SMTP_USER === 'mock_user@ethereal.email' ||
     process.env.SMTP_USER === 'your-email@gmail.com' ||
     process.env.SMTP_PASS === 'mock_pass' ||
     process.env.SMTP_PASS === 'your-app-password-here';
 
   if (process.env.SMTP_HOST && !isMockCredential) {
+    if (cachedTransporter) return { transporter: cachedTransporter, isTestAccount: false };
+
     const port = parseInt(process.env.SMTP_PORT, 10) || 587;
     const isSecure = port === 465;
-    
-    transporter = nodemailer.createTransport({
+
+    cachedTransporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: port,
-      secure: isSecure, // true for 465, false for other ports
+      secure: isSecure,
+      pool: true, // Use pooled connections for high-speed dispatch
+      maxConnections: 5,
+      maxMessages: 100,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
       tls: {
-        rejectUnauthorized: false // Avoid blockages due to unauthorized SSL certs
-      }
-    });
-  } else {
-    // Development fallback using Ethereal test account if SMTP not fully configured or mock
-    isTestAccount = true;
-    console.log('Using Ethereal development mail service...');
-    const testAccount = await nodemailer.createTestAccount();
-    transporter = nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
+        rejectUnauthorized: false,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 5000,
+      socketTimeout: 15000,
     });
+
+    return { transporter: cachedTransporter, isTestAccount: false };
   }
+
+  // Development fallback: Ethereal test mail
+  const testAccount = await nodemailer.createTestAccount();
+  const testTransporter = nodemailer.createTransport({
+    host: 'smtp.ethereal.email',
+    port: 587,
+    secure: false,
+    auth: {
+      user: testAccount.user,
+      pass: testAccount.pass,
+    },
+  });
+
+  return { transporter: testTransporter, isTestAccount: true };
+};
+
+const sendEmail = async (options) => {
+  const { transporter, isTestAccount } = await getTransporter();
 
   const message = {
     from: process.env.EMAIL_FROM || `EstateXplorer <${process.env.SMTP_USER || 'noreply@estatexplorer.com'}>`,
@@ -52,12 +69,13 @@ const sendEmail = async (options) => {
   };
 
   const info = await transporter.sendMail(message);
-  console.log('Message sent: %s', info.messageId);
 
   if (isTestAccount) {
     const previewUrl = nodemailer.getTestMessageUrl(info);
-    console.log('✉️ Ethereal Email Preview URL: %s', previewUrl);
+    console.log('✉️ Ethereal Email Preview URL:', previewUrl);
   }
+
+  return info;
 };
 
 module.exports = sendEmail;

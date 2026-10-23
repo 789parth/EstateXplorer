@@ -250,34 +250,37 @@ exports.sendRegistrationOTP = async (req, res, next) => {
     });
 
 
-    // Send verification email
+    // Send verification email (await so serverless function does not freeze connection before delivery)
     const recipientName = name ? normalizeTitleCase(name) : 'Valued User';
-    sendEmail({
-      email: normalizedEmail,
-      subject: 'EstateXplorer - Verify Your Email to Create Your Account',
-      message: `Hello ${recipientName}, your verification code is ${otpCode}. It will expire in 10 minutes.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 24px; color: #0a1628; max-width: 520px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 16px; background: #ffffff;">
-          <div style="text-align: center; margin-bottom: 20px;">
-            <div style="display: inline-block; background: #0f172a; color: #38bdf8; font-weight: 800; font-size: 20px; padding: 10px 18px; border-radius: 12px; margin-bottom: 12px;">
-              EstateXplorer
+    try {
+      await sendEmail({
+        email: normalizedEmail,
+        subject: 'EstateXplorer - Verify Your Email to Create Your Account',
+        message: `Hello ${recipientName}, your verification code is ${otpCode}. It will expire in 10 minutes.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 24px; color: #0a1628; max-width: 520px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 16px; background: #ffffff;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <div style="display: inline-block; background: #0f172a; color: #38bdf8; font-weight: 800; font-size: 20px; padding: 10px 18px; border-radius: 12px; margin-bottom: 12px;">
+                EstateXplorer
+              </div>
+              <h2 style="color: #0f172a; margin: 8px 0 4px 0; font-size: 22px;">Confirm Your Email Address</h2>
+              <p style="color: #64748b; font-size: 13px; margin: 0;">Complete your registration by entering this 6-digit code</p>
             </div>
-            <h2 style="color: #0f172a; margin: 8px 0 4px 0; font-size: 22px;">Confirm Your Email Address</h2>
-            <p style="color: #64748b; font-size: 13px; margin: 0;">Complete your registration by entering this 6-digit code</p>
+            <p style="font-size: 14px; line-height: 1.6;">Hello <strong>${recipientName}</strong>,</p>
+            <p style="font-size: 14px; line-height: 1.6; color: #334155;">Thank you for registering on EstateXplorer. Please use the following 6-digit verification code to confirm your email address:</p>
+            <div style="text-align: center; margin: 28px 0;">
+              <span style="font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #0f172a; background: #f1f5f9; padding: 14px 28px; border-radius: 12px; border: 1px solid #cbd5e1; display: inline-block; font-family: 'Courier New', monospace;">${otpCode}</span>
+            </div>
+            <p style="font-size: 12px; color: #64748b; line-height: 1.5; text-align: center;">This code is valid for <strong>10 minutes</strong>. If you did not request this registration, please disregard this email.</p>
+            <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 24px 0;">
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; 2026 EstateXplorer. All rights reserved.</p>
           </div>
-          <p style="font-size: 14px; line-height: 1.6;">Hello <strong>${recipientName}</strong>,</p>
-          <p style="font-size: 14px; line-height: 1.6; color: #334155;">Thank you for registering on EstateXplorer. Please use the following 6-digit verification code to confirm your email address:</p>
-          <div style="text-align: center; margin: 28px 0;">
-            <span style="font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #0f172a; background: #f1f5f9; padding: 14px 28px; border-radius: 12px; border: 1px solid #cbd5e1; display: inline-block; font-family: 'Courier New', monospace;">${otpCode}</span>
-          </div>
-          <p style="font-size: 12px; color: #64748b; line-height: 1.5; text-align: center;">This code is valid for <strong>10 minutes</strong>. If you did not request this registration, please disregard this email.</p>
-          <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 24px 0;">
-          <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; 2026 EstateXplorer. All rights reserved.</p>
-        </div>
-      `,
-    }).catch(err => {
+        `,
+      });
+    } catch (err) {
       console.error('Failed to send registration OTP email:', err.message);
-    });
+      return next(new AppError('Failed to dispatch verification email. Please verify SMTP credentials or try again.', 500));
+    }
 
     res.status(200).json({
       success: true,
@@ -482,25 +485,30 @@ exports.login = async (req, res, next) => {
       });
 
 
-      sendEmail({
-        email: user.email,
-        subject: 'Your EstateXplorer Two-Factor Authentication Code',
-        message: `Your login verification code is ${otpCode}. It will expire in 10 minutes.`,
-        html: `
-          <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 500px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
-            <h2 style="color: #0f172a; text-align: center; margin-bottom: 8px;">Two-Factor Authentication</h2>
-            <p style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0;">EstateXplorer Account Security</p>
-            <p>Hello <strong>${user.name}</strong>,</p>
-            <p>You are attempting to sign in to your EstateXplorer account. Use the verification code below to complete your login:</p>
-            <div style="text-align: center; margin: 24px 0;">
-              <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1e3a8a; background: #f1f5f9; padding: 12px 24px; border-radius: 8px; display: inline-block;">${otpCode}</span>
+      try {
+        await sendEmail({
+          email: user.email,
+          subject: 'Your EstateXplorer Two-Factor Authentication Code',
+          message: `Your login verification code is ${otpCode}. It will expire in 10 minutes.`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 500px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #0f172a; text-align: center; margin-bottom: 8px;">Two-Factor Authentication</h2>
+              <p style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0;">EstateXplorer Account Security</p>
+              <p>Hello <strong>${user.name}</strong>,</p>
+              <p>You are attempting to sign in to your EstateXplorer account. Use the verification code below to complete your login:</p>
+              <div style="text-align: center; margin: 24px 0;">
+                <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1e3a8a; background: #f1f5f9; padding: 12px 24px; border-radius: 8px; display: inline-block;">${otpCode}</span>
+              </div>
+              <p style="font-size: 13px; color: #64748b;">This code expires in 10 minutes. If you did not request this login code, please secure your account immediately.</p>
+              <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 20px 0;">
+              <p style="font-size: 11px; color: #94a3b8; text-align: center;">&copy; 2026 EstateXplorer. All rights reserved.</p>
             </div>
-            <p style="font-size: 13px; color: #64748b;">This code expires in 10 minutes. If you did not request this login code, please secure your account immediately.</p>
-            <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 20px 0;">
-            <p style="font-size: 11px; color: #94a3b8; text-align: center;">&copy; 2026 EstateXplorer. All rights reserved.</p>
-          </div>
-        `,
-      }).catch((err) => console.error('2FA email send error:', err.message));
+          `,
+        });
+      } catch (err) {
+        console.error('2FA email send error:', err.message);
+        return next(new AppError('Failed to dispatch 2FA email code. Please try again.', 500));
+      }
 
       return res.status(200).json({
         success: true,
@@ -1607,25 +1615,30 @@ exports.sendVerifyEmailOTP = async (req, res, next) => {
     });
 
 
-    sendEmail({
-      email: user.email,
-      subject: 'EstateXplorer - Verify Your Email Address',
-      message: `Your verification code is ${otpCode}. It will expire in 10 minutes.`,
-      html: `
-        <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 500px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
-          <h2 style="color: #0f172a; text-align: center; margin-bottom: 8px;">Verify Your Email</h2>
-          <p style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0;">EstateXplorer Account Verification</p>
-          <p>Hello <strong>${user.name}</strong>,</p>
-          <p>Please enter the 6-digit verification code below to verify your email address:</p>
-          <div style="text-align: center; margin: 24px 0;">
-            <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1e3a8a; background: #f1f5f9; padding: 12px 24px; border-radius: 8px; display: inline-block;">${otpCode}</span>
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'EstateXplorer - Verify Your Email Address',
+        message: `Your verification code is ${otpCode}. It will expire in 10 minutes.`,
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 20px; color: #0a1628; max-width: 500px; margin: 0 auto; border: 1px solid #e2e6ee; border-radius: 12px; background: #ffffff;">
+            <h2 style="color: #0f172a; text-align: center; margin-bottom: 8px;">Verify Your Email</h2>
+            <p style="color: #64748b; font-size: 14px; text-align: center; margin-top: 0;">EstateXplorer Account Verification</p>
+            <p>Hello <strong>${user.name}</strong>,</p>
+            <p>Please enter the 6-digit verification code below to verify your email address:</p>
+            <div style="text-align: center; margin: 24px 0;">
+              <span style="font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1e3a8a; background: #f1f5f9; padding: 12px 24px; border-radius: 8px; display: inline-block;">${otpCode}</span>
+            </div>
+            <p style="font-size: 13px; color: #64748b;">This code expires in 10 minutes. If you did not request this verification, please ignore this email.</p>
+            <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 20px 0;">
+            <p style="font-size: 11px; color: #94a3b8; text-align: center;">&copy; 2026 EstateXplorer. All rights reserved.</p>
           </div>
-          <p style="font-size: 13px; color: #64748b;">This code expires in 10 minutes. If you did not request this verification, please ignore this email.</p>
-          <hr style="border: none; border-top: 1px solid #e2e6ee; margin: 20px 0;">
-          <p style="font-size: 11px; color: #94a3b8; text-align: center;">&copy; 2026 EstateXplorer. All rights reserved.</p>
-        </div>
-      `,
-    }).catch((err) => console.error('Verification email send error:', err.message));
+        `,
+      });
+    } catch (err) {
+      console.error('Verification email send error:', err.message);
+      return next(new AppError('Failed to dispatch verification email. Please try again.', 500));
+    }
 
     res.status(200).json({
       success: true,
