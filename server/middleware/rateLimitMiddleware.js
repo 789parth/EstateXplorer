@@ -25,13 +25,8 @@ const authRateLimiter = rateLimit({
   },
 });
 
-const otpRateLimiter = rateLimit({
-  windowMs: parseInt(process.env.OTP_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
-  max: parseInt(process.env.OTP_RATE_LIMIT_MAX, 10) || 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many verification attempts. Please try again later.' },
-});
+// OTP limits disabled per user requirement to ensure unhindered verification across all environments
+const otpRateLimiter = (req, res, next) => next();
 
 module.exports = {
   authRateLimiter,
