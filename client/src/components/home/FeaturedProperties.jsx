@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import PropertyCard from './PropertyCard';
 import { Link } from 'react-router-dom';
 import { getFeaturedProperties } from '../../services/propertyService';
+import { calculateBuyerEffectivePrice, formatPrice } from '../../utils/formatters';
 
 const FeaturedProperties = ({ onBookVisit, onViewDetails, bookedPropertyIds = [] }) => {
   const [properties, setProperties] = useState([]);
@@ -13,12 +14,20 @@ const FeaturedProperties = ({ onBookVisit, onViewDetails, bookedPropertyIds = []
       try {
         const res = await getFeaturedProperties('property');
         if (isMounted && res.success && Array.isArray(res.data) && res.data.length > 0) {
-          const mapped = res.data.map(p => ({
+          const mapped = res.data.map(p => {
+            const { effectivePrice, isAgentAttributed } = calculateBuyerEffectivePrice(p);
+            const displayPrice = isAgentAttributed ? formatPrice(effectivePrice, undefined, p.purpose) : (p.priceDisplay || formatPrice(p.price, undefined, p.purpose));
+            return {
             id: p._id,
             builder: p.builder?.builderProfile?.companyName || p.builder?.name || 'Verified Builder',
             name: p.title || p.name,
             location: typeof p.location === 'string' ? p.location : `${p.location?.address || ''}, ${p.location?.city || ''}`,
-            price: p.priceDisplay || `₹${p.price}`,
+            price: isAgentAttributed ? effectivePrice : p.price,
+            priceDisplay: displayPrice,
+            assignedAgent: p.assignedAgent,
+            defaultCommissionRate: p.defaultCommissionRate,
+            commissionAmount: p.commissionAmount,
+            purpose: p.purpose || 'buy',
             emi: p.priceSub || '',
             beds: p.bhk ? `${p.bhk} Beds` : p.type,
             baths: `${p.bhk ? Math.max(1, p.bhk - 1) : 1} Baths`,
@@ -29,7 +38,8 @@ const FeaturedProperties = ({ onBookVisit, onViewDetails, bookedPropertyIds = []
             verified: true,
             rera: Boolean(p.rera),
             image: p.images?.[0] || p.image || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?q=80&w=600&auto=format&fit=crop',
-          }));
+          };
+        });
           setProperties(mapped);
         }
       } catch (err) {

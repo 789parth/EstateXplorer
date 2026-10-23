@@ -249,10 +249,9 @@ const AddPropertyModal = ({ isOpen, onClose, onSuccess, initialData = null, defa
       const res = await uploadMultipleImages(files);
       if (res.success && (res.urls || res.data)) {
         const rawUrls = res.urls || (Array.isArray(res.data) ? res.data.map(d => d.url) : [res.data?.url]).filter(Boolean);
-        const resolvedUrls = rawUrls.map(u => getPublicImageUrl(u));
         setImages(prev => {
           const existing = prev.filter(x => x.trim() !== '');
-          return [...existing, ...resolvedUrls];
+          return [...existing, ...rawUrls];
         });
         showToast(`${files.length} photo/video file(s) uploaded successfully!`, 'success');
       }

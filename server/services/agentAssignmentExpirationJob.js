@@ -45,8 +45,9 @@ async function checkAndExpireAgentAssignments() {
       ).catch(() => {});
 
       // Notify builder/owner in real-time
-      if (prop.builder) {
-        emitToUser(String(prop.builder), SOCKET_EVENTS.PROPERTIES, {
+      const ownerId = prop.builder || prop.user;
+      if (ownerId) {
+        emitToUser(String(ownerId), SOCKET_EVENTS.PROPERTIES, {
           action: 'assignment_expired',
           propertyId: prop._id,
           title: prop.title,

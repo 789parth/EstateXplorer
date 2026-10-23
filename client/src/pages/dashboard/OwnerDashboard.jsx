@@ -269,7 +269,7 @@ const OwnerDashboard = () => {
           prev.map((item) => (item._id === partnershipId ? { ...item, ...res.data, status: 'approved' } : item))
         );
         broadcastRealtimeSync(SYNC_EVENTS.PARTNERSHIPS, { action: 'approved', partnershipId });
-        showToast('Agent request approved! Referral tracking link activated for this agent.', 'success');
+        showToast('Agent request approved! Authorized selling rights granted for this property.', 'success');
       }
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to approve agent request', 'error');

@@ -117,6 +117,148 @@ const mapListingProperty = (p) => {
   };
 };
 
+const ListingItem = React.memo(({ prop, onShare, navigate }) => {
+  return (
+    <article
+      key={prop.id}
+      className={`lp-prop-card ${typeof prop.id === 'string' ? 'lp-clickable' : ''}`}
+      onClick={() => typeof prop.id === 'string' && navigate(`/property/${prop.id}`)}
+      style={{ cursor: typeof prop.id === 'string' ? 'pointer' : 'default' }}
+    >
+      <div className="lp-prop-img">
+        <img
+          src={prop.img || (Array.isArray(prop.images) && prop.images[0]) || prop.image || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop'}
+          alt={prop.name || 'Property'}
+          loading="lazy"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = (Array.isArray(prop.images) && prop.images[0]) || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop';
+          }}
+        />
+        <span
+          style={{
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            background: prop.purpose === 'rent' ? '#059669' : '#0f172a',
+            color: '#fff',
+            fontSize: '0.65rem',
+            fontWeight: 700,
+            letterSpacing: '0.06em',
+            padding: '3px 8px',
+            borderRadius: '4px',
+            textTransform: 'uppercase',
+            zIndex: 2,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+          }}
+        >
+          {prop.purpose === 'rent' ? 'For Rent' : 'For Sale'}
+        </span>
+        {prop.rera && (
+          <span className="lp-prop-badge">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
+            </svg>
+            RERA
+          </span>
+        )}
+        <span className="lp-prop-photos">
+          {prop.videos > 0 && prop.photos > 0 ? (
+            <>
+              <span className="inline-flex items-center gap-1">
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <path d="M21 15l-5-5L5 21"/>
+                </svg>
+                <span>{prop.photos} {prop.photos === 1 ? 'Photo' : 'Photos'}</span>
+              </span>
+              <span className="opacity-50">·</span>
+              <span className="inline-flex items-center gap-1">
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <polygon points="23 7 16 12 23 17 23 7" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                </svg>
+                <span>{prop.videos} {prop.videos === 1 ? 'Video' : 'Videos'}</span>
+              </span>
+            </>
+          ) : prop.videos > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              <span>{prop.videos} {prop.videos === 1 ? 'Video' : 'Videos'}</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <path d="M21 15l-5-5L5 21"/>
+              </svg>
+              <span>{prop.photos || 1} {prop.photos === 1 ? 'Photo' : 'Photos'}</span>
+            </span>
+          )}
+        </span>
+      </div>
+
+      <div className="lp-prop-body">
+        <div className="lp-prop-top">
+          <h2 className="lp-prop-name">{prop.name}</h2>
+          <p className="lp-prop-loc">
+            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+            {prop.location}
+          </p>
+        </div>
+        <div>
+          <div className="lp-prop-type">{prop.type}</div>
+          <div className="lp-prop-price">{prop.priceDisplay}</div>
+          <div className="lp-prop-price-sub">{prop.priceSub}</div>
+        </div>
+        <div className="lp-prop-usps">
+          {prop.usps.map((usp, i) => (
+            <span key={i} className="lp-prop-usp">{usp}</span>
+          ))}
+        </div>
+      </div>
+
+      <div className="lp-prop-right">
+        <div className="lp-prop-status">
+          <div className={`lp-status-label ${prop.ready ? 'lp-status-ready' : ''}`}>{prop.statusLabel}</div>
+          <div className="lp-status-date">{prop.statusDate}</div>
+        </div>
+        <div className="lp-prop-actions">
+          {typeof prop.id === 'string' ? (
+            <Link
+              to={`/property/${prop.id}`}
+              className="lp-btn-primary"
+              onClick={e => e.stopPropagation()}
+            >View Details</Link>
+          ) : (
+            <span className="lp-btn-primary" style={{opacity:.45, cursor:'not-allowed'}} title="Demo listing">View Details</span>
+          )}
+          <button
+            type="button"
+            className="lp-btn-share"
+            onClick={(e) => {
+              e.stopPropagation();
+              onShare(prop);
+            }}
+            title="Share property details"
+          >
+            <Share2 size={13} />
+            <span>Share</span>
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+});
+
 const Listings = ({ projectOnly = false }) => {
   const { user, showToast } = useAuth();
   const navigate = useNavigate();
@@ -1514,144 +1656,13 @@ const Listings = ({ projectOnly = false }) => {
                   </button>
                 </div>
               ) : (
-                filtered.slice(0, visibleCount).map(prop => (
-                  <article
+                filtered.slice(0, visibleCount).map((prop) => (
+                  <ListingItem
                     key={prop.id}
-                    className={`lp-prop-card ${typeof prop.id === 'string' ? 'lp-clickable' : ''}`}
-                    onClick={() => typeof prop.id === 'string' && navigate(`/property/${prop.id}`)}
-                    style={{ cursor: typeof prop.id === 'string' ? 'pointer' : 'default' }}
-                  >
-                    <div className="lp-prop-img">
-                      <img
-                        src={prop.img || (Array.isArray(prop.images) && prop.images[0]) || prop.image || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop'}
-                        alt={prop.name || 'Property'}
-                        loading="lazy"
-                        onError={(e) => {
-                          e.currentTarget.onerror = null;
-                          e.currentTarget.src = (Array.isArray(prop.images) && prop.images[0]) || 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=800&auto=format&fit=crop';
-                        }}
-                      />
-                      <span
-                        style={{
-                          position: 'absolute',
-                          top: '10px',
-                          right: '10px',
-                          background: prop.purpose === 'rent' ? '#059669' : '#0f172a',
-                          color: '#fff',
-                          fontSize: '0.65rem',
-                          fontWeight: 700,
-                          letterSpacing: '0.06em',
-                          padding: '3px 8px',
-                          borderRadius: '4px',
-                          textTransform: 'uppercase',
-                          zIndex: 2,
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-                        }}
-                      >
-                        {prop.purpose === 'rent' ? 'For Rent' : 'For Sale'}
-                      </span>
-                      {prop.rera && (
-                        <span className="lp-prop-badge">
-                          <svg viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>
-                          </svg>
-                          RERA
-                        </span>
-                      )}
-                      <span className="lp-prop-photos">
-                        {prop.videos > 0 && prop.photos > 0 ? (
-                          <>
-                            <span className="inline-flex items-center gap-1">
-                              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                                <circle cx="8.5" cy="8.5" r="1.5"/>
-                                <path d="M21 15l-5-5L5 21"/>
-                              </svg>
-                              <span>{prop.photos} {prop.photos === 1 ? 'Photo' : 'Photos'}</span>
-                            </span>
-                            <span className="opacity-50">·</span>
-                            <span className="inline-flex items-center gap-1">
-                              <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                                <polygon points="23 7 16 12 23 17 23 7" />
-                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                              </svg>
-                              <span>{prop.videos} {prop.videos === 1 ? 'Video' : 'Videos'}</span>
-                            </span>
-                          </>
-                        ) : prop.videos > 0 ? (
-                          <span className="inline-flex items-center gap-1">
-                            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <polygon points="23 7 16 12 23 17 23 7" />
-                              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                            </svg>
-                            <span>{prop.videos} {prop.videos === 1 ? 'Video' : 'Videos'}</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1">
-                            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                              <rect x="3" y="3" width="18" height="18" rx="2"/>
-                              <circle cx="8.5" cy="8.5" r="1.5"/>
-                              <path d="M21 15l-5-5L5 21"/>
-                            </svg>
-                            <span>{prop.photos || 1} {prop.photos === 1 ? 'Photo' : 'Photos'}</span>
-                          </span>
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="lp-prop-body">
-                      <div className="lp-prop-top">
-                        <h2 className="lp-prop-name">{prop.name}</h2>
-                        <p className="lp-prop-loc">
-                          <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/>
-                            <circle cx="12" cy="10" r="3"/>
-                          </svg>
-                          {prop.location}
-                        </p>
-                      </div>
-                      <div>
-                        <div className="lp-prop-type">{prop.type}</div>
-                        <div className="lp-prop-price">{prop.priceDisplay}</div>
-                        <div className="lp-prop-price-sub">{prop.priceSub}</div>
-                      </div>
-                      <div className="lp-prop-usps">
-                        {prop.usps.map((usp, i) => (
-                          <span key={i} className="lp-prop-usp">{usp}</span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="lp-prop-right">
-                      <div className="lp-prop-status">
-                        <div className={`lp-status-label ${prop.ready ? 'lp-status-ready' : ''}`}>{prop.statusLabel}</div>
-                        <div className="lp-status-date">{prop.statusDate}</div>
-                      </div>
-                      <div className="lp-prop-actions">
-                        {typeof prop.id === 'string' ? (
-                          <Link
-                            to={`/property/${prop.id}`}
-                            className="lp-btn-primary"
-                            onClick={e => e.stopPropagation()}
-                          >View Details</Link>
-                        ) : (
-                          <span className="lp-btn-primary" style={{opacity:.45, cursor:'not-allowed'}} title="Demo listing">View Details</span>
-                        )}
-                        <button
-                          type="button"
-                          className="lp-btn-share"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setShareModalProp(prop);
-                          }}
-                          title="Share property details"
-                        >
-                          <Share2 size={13} />
-                          <span>Share</span>
-                        </button>
-                      </div>
-                    </div>
-                  </article>
+                    prop={prop}
+                    onShare={setShareModalProp}
+                    navigate={navigate}
+                  />
                 ))
               )}
             </div>

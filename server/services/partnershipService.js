@@ -139,9 +139,9 @@ async function updatePartnershipStatus(builderId, partnershipId, status, commiss
     throw new Error('Unauthorized. You do not own the project or property associated with this partnership.');
   }
 
-  // If approving, verify that property exists and has no other agent assigned
+  const property = await Property.findById(partnership.project?._id || partnership.project);
   if (normalizedStatus === 'approved') {
-    const property = await Property.findById(partnership.project?._id || partnership.project);
+    // If approving, verify that property exists and has no other agent assigned
     if (!property) {
       throw new Error('Associated property not found.');
     }

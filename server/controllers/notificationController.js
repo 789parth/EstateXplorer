@@ -135,7 +135,11 @@ exports.markAsRead = async (req, res, next) => {
     const { id } = req.params;
     const filter = { _id: id };
     if (req.user.role !== 'admin') {
-      filter.recipient = req.user._id;
+      const orClauses = [{ recipient: req.user._id }];
+      if (req.user.phone) {
+        orClauses.push({ recipientPhone: req.user.phone.replace(/\D/g, '').slice(-10) });
+      }
+      filter.$or = orClauses;
     }
 
     const notification = await NotificationLog.findOneAndUpdate(

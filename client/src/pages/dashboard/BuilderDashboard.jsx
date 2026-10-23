@@ -3282,23 +3282,6 @@ const BuilderDashboard = () => {
                                 )}
                               </div>
                               <div className="text-[11px] text-slate-500 truncate">{agentEmail}</div>
-
-                              {isApproved && (
-                                <div className="mt-1.5 flex items-center gap-1.5">
-                                  <span className="text-[10px] font-semibold text-slate-500">Referral:</span>
-                                  <code className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-mono truncate max-w-[200px]">
-                                    {affiliateUrl}
-                                  </code>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleCopyLink(affiliateCode, affiliateUrl, req._id)}
-                                    className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-                                    title="Copy link"
-                                  >
-                                    <Copy size={11} />
-                                  </button>
-                                </div>
-                              )}
                             </div>
 
                             <div className="flex items-center gap-1.5 shrink-0">

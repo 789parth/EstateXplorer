@@ -117,7 +117,7 @@ const propertySchema = new mongoose.Schema(
       type: Number,
       default: 2.5, // Standard industry 2.5% default commission
       min: [0, 'Commission rate cannot be negative'],
-      max: [20, 'Commission rate cannot exceed 20%'],
+      max: [100, 'Commission rate cannot exceed 100%'],
     },
     commissionAmount: {
       type: Number,

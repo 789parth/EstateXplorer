@@ -463,7 +463,7 @@ exports.login = async (req, res, next) => {
         user.roles.push(role);
       }
       user.role = role;
-      user.save().catch(() => { });
+      await user.save();
     } else if (role === 'admin') {
       return res.status(403).json({
         success: false,
@@ -594,6 +594,7 @@ exports.refresh = async (req, res, next) => {
           email: user.email,
           phone: user.phone || '',
           city: user.city || '',
+          state: user.state || '',
           about: user.about || '',
           role: activeRole,
           roles: approvedRoles,
@@ -606,6 +607,12 @@ exports.refresh = async (req, res, next) => {
           builderProfile: user.builderProfile,
           agentProfile: user.agentProfile,
           ownerProfile: user.ownerProfile,
+          kycVerification: user.kycVerification || { status: 'unverified' },
+          roleKycVerification: user.roleKycVerification || {
+            builder: { status: 'unverified' },
+            agent: { status: 'unverified' },
+            owner: { status: 'unverified' },
+          },
           createdAt: user.createdAt,
         },
       },
@@ -1262,7 +1269,7 @@ exports.googleAuth = async (req, res, next) => {
       user = await User.create({
         name,
         email: normalizedEmail,
-        phone: cleanPhone,
+        phone: normalizePhoneNumber(cleanPhone),
         googleId,
         authProvider: 'google',
         role: activeRole,
@@ -1897,44 +1904,64 @@ exports.submitKycDocuments = async (req, res, next) => {
 
     const { aadharCard, panCard, companyDoc, agencyDoc } = req.body;
 
+    const existingRoleKyc = user.roleKycVerification?.[targetRole] || {};
+    const existingGeneralKyc = user.kycVerification || {};
+    const findExistingDoc = (docType) => {
+      if (existingRoleKyc[docType]?.url) return existingRoleKyc[docType];
+      if (existingGeneralKyc[docType]?.url) return existingGeneralKyc[docType];
+      if (user.roleKycVerification) {
+        for (const r of ['builder', 'agent', 'owner']) {
+          if (user.roleKycVerification[r]?.[docType]?.url) return user.roleKycVerification[r][docType];
+        }
+      }
+      return null;
+    };
+    const existingAadhar = findExistingDoc('aadharCard');
+    const existingPan = findExistingDoc('panCard');
+    const effectiveAadhar = (aadharCard && aadharCard.url) ? aadharCard : existingAadhar;
+    const effectivePan = (panCard && panCard.url) ? panCard : existingPan;
+
     // Aadhar Card and PAN Card are mandatory for all 3 roles
-    if (!aadharCard || !aadharCard.url) {
+    if (!effectiveAadhar || !effectiveAadhar.url) {
       return next(new AppError('Aadhar Card document upload is mandatory.', 400));
     }
-    if (!panCard || !panCard.url) {
+    if (!effectivePan || !effectivePan.url) {
       return next(new AppError('PAN Card document upload is mandatory.', 400));
     }
 
+    const aadharStatus = (effectiveAadhar === existingAadhar && ['verified', 'approved'].includes(existingAadhar?.status)) ? existingAadhar.status : 'pending';
+    const panStatus = (effectivePan === existingPan && ['verified', 'approved'].includes(existingPan?.status)) ? existingPan.status : 'pending';
+
     // Role-specific document submission object
     const roleDocSubmission = {
-      status: 'pending',
+      status: (aadharStatus === 'verified' && panStatus === 'verified' && existingRoleKyc.status === 'verified') ? 'verified' : 'pending',
       submittedAt: new Date(),
-      reviewedAt: null,
-      reviewedBy: null,
+      reviewedAt: (existingRoleKyc.status === 'verified') ? existingRoleKyc.reviewedAt : null,
+      reviewedBy: (existingRoleKyc.status === 'verified') ? existingRoleKyc.reviewedBy : null,
       rejectionReason: '',
       aadharCard: {
-        number: aadharCard.number ? aadharCard.number.trim() : '',
-        url: aadharCard.url.trim(),
-        name: aadharCard.name || 'Aadhar Card',
-        status: 'pending',
+        number: effectiveAadhar.number ? String(effectiveAadhar.number).trim() : '',
+        url: effectiveAadhar.url.trim(),
+        name: effectiveAadhar.name || 'Aadhar Card',
+        status: aadharStatus,
       },
       panCard: {
-        number: panCard.number ? panCard.number.trim().toUpperCase() : '',
-        url: panCard.url.trim(),
-        name: panCard.name || 'PAN Card',
-        status: 'pending',
+        number: effectivePan.number ? String(effectivePan.number).trim().toUpperCase() : '',
+        url: effectivePan.url.trim(),
+        name: effectivePan.name || 'PAN Card',
+        status: panStatus,
       },
       companyDoc: {
-        number: companyDoc?.number ? companyDoc.number.trim() : '',
-        url: companyDoc?.url ? companyDoc.url.trim() : '',
+        number: companyDoc?.number ? String(companyDoc.number).trim() : (existingRoleKyc.companyDoc?.number || ''),
+        url: companyDoc?.url ? companyDoc.url.trim() : (existingRoleKyc.companyDoc?.url || ''),
         name: companyDoc?.name || (targetRole === 'builder' ? 'Company Verification' : ''),
-        status: companyDoc?.url ? 'pending' : 'unverified',
+        status: companyDoc?.url ? 'pending' : (existingRoleKyc.companyDoc?.status || 'unverified'),
       },
       agencyDoc: {
-        number: agencyDoc?.number ? agencyDoc.number.trim() : '',
-        url: agencyDoc?.url ? agencyDoc.url.trim() : '',
+        number: agencyDoc?.number ? String(agencyDoc.number).trim() : (existingRoleKyc.agencyDoc?.number || ''),
+        url: agencyDoc?.url ? agencyDoc.url.trim() : (existingRoleKyc.agencyDoc?.url || ''),
         name: agencyDoc?.name || (targetRole === 'agent' ? 'Agency Verification' : ''),
-        status: agencyDoc?.url ? 'pending' : 'unverified',
+        status: agencyDoc?.url ? 'pending' : (existingRoleKyc.agencyDoc?.status || 'unverified'),
       },
     };
 

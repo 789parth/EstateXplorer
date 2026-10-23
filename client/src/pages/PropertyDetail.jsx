@@ -154,6 +154,212 @@ export const formatDisplayDate = (dateStr, now = new Date()) => {
   return `${prefix}${formatted}`;
 };
 
+// Memoized Inquiry & Site Visit Modal component.
+// Colocating the form state inside the modal ensures typing inputs never re-renders the underlying PropertyDetail page.
+const InquiryModal = React.memo(({
+  inquiryMode,
+  inquirySuccess,
+  inquiryError,
+  setInquiryError,
+  submitting,
+  property,
+  user,
+  isAgentAssigned,
+  agentName,
+  agentAgency,
+  onClose,
+  onSubmit,
+}) => {
+  const [form, setForm] = useState(() => {
+    const initialDate = getEarliestBookableDate();
+    const availableSlots = getAvailableSlots(initialDate);
+    const propTitle = property?.title || property?.name || 'this property';
+    return {
+      name: user?.name || '',
+      phone: user?.phone || '',
+      email: user?.email || '',
+      message: inquiryMode === 'visit'
+        ? `I would like to schedule a site visit for ${propTitle}. Please confirm the available slots.`
+        : `I am interested in ${propTitle}. Please share more details.`,
+      visitDate: initialDate,
+      visitTime: availableSlots[0]?.value || 'Morning (10 AM - 1 PM)',
+    };
+  });
+
+  const handleDateChange = (e) => {
+    const selectedDate = e.target.value;
+    const now = new Date();
+    const available = getAvailableSlots(selectedDate, now);
+    const currentValid = available.some((s) => s.value === form.visitTime);
+    setForm((f) => ({
+      ...f,
+      visitDate: selectedDate,
+      visitTime: currentValid ? f.visitTime : (available[0]?.value || SITE_VISIT_TIME_SLOTS[0].value),
+    }));
+    if (setInquiryError) setInquiryError('');
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(form, e);
+  };
+
+  return (
+    <div className="pd-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="pd-modal">
+        <button className="pd-modal-close" onClick={onClose}>
+          <X size={18} />
+        </button>
+        {inquirySuccess ? (
+          <div className="pd-success">
+            <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+              <CheckCircle2 size={32} />
+            </div>
+            <h3>{inquiryMode === 'visit' ? 'Site Visit Booked!' : 'Inquiry Sent!'}</h3>
+            <p>
+              {inquiryMode === 'visit'
+                ? (isAgentAssigned
+                    ? `Your visit request has been sent to assigned agent ${agentName}. They will confirm your scheduled slot shortly.`
+                    : 'Your visit request has been recorded in the database. The builder representative will confirm your scheduled slot shortly.')
+                : (isAgentAssigned
+                    ? `Your inquiry has been sent directly to assigned agent ${agentName}. Thank you for your interest!`
+                    : 'The property representative will contact you shortly. Thank you for your interest!')}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="pd-modal-head">
+              <h3>{inquiryMode === 'visit' ? 'Book a Site Visit' : 'Send Free Inquiry'}</h3>
+              <p>About: <strong>{property?.title || property?.name}</strong></p>
+              {isAgentAssigned && (
+                <p className="text-xs text-indigo-700 font-medium mt-1">
+                  Assigned Agent: <strong>{agentName}</strong> {agentAgency ? `(${agentAgency})` : ''}
+                </p>
+              )}
+            </div>
+            {inquiryError && (
+              <div className="pd-error-banner">
+                {inquiryError}
+              </div>
+            )}
+            <form className="pd-form" onSubmit={handleSubmit}>
+              <div className="pd-form-row">
+                <div className="pd-field">
+                  <label htmlFor="inq-name">
+                    Your Name <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                  </label>
+                  <input 
+                    id="inq-name" 
+                    type="text" 
+                    placeholder="Full name" 
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} 
+                    minLength={3}
+                    required 
+                  />
+                </div>
+                <div className="pd-field">
+                  <label htmlFor="inq-phone">
+                    Phone Number <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                  </label>
+                  <input 
+                    id="inq-phone" 
+                    type="tel" 
+                    placeholder="+91 7600973093" 
+                    value={form.phone}
+                    onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} 
+                    required 
+                  />
+                </div>
+              </div>
+              <div className="pd-field">
+                <label htmlFor="inq-email">
+                  Email Address <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                </label>
+                <input 
+                  id="inq-email" 
+                  type="email" 
+                  placeholder="you@example.com" 
+                  value={form.email}
+                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} 
+                  required 
+                />
+              </div>
+
+              {inquiryMode === 'visit' && (() => {
+                const now = new Date();
+                const earliestDate = getEarliestBookableDate(now);
+                const maxDate = getMaxBookableDate(now, 60);
+
+                return (
+                  <div className="pd-form-row">
+                    <div className="pd-field">
+                      <label htmlFor="inq-date">
+                        Preferred Visit Date <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                      </label>
+                      <input
+                        id="inq-date"
+                        type="date"
+                        min={earliestDate}
+                        max={maxDate}
+                        value={form.visitDate}
+                        onChange={handleDateChange}
+                        required
+                      />
+                    </div>
+
+                    <div className="pd-field">
+                      <label htmlFor="inq-time">
+                        Preferred Time Slot <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                      </label>
+                      <select
+                        id="inq-time"
+                        value={form.visitTime}
+                        onChange={(e) => {
+                          setForm((f) => ({ ...f, visitTime: e.target.value }));
+                          if (setInquiryError) setInquiryError('');
+                        }}
+                        required
+                      >
+                        {SITE_VISIT_TIME_SLOTS.map((slot) => {
+                          const expired = isSlotExpired(slot, form.visitDate, now);
+                          return (
+                            <option key={slot.id} value={slot.value} disabled={expired}>
+                              {slot.label}{expired ? ' (Closed)' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div className="pd-field">
+                <label htmlFor="inq-msg">
+                  Message <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
+                </label>
+                <textarea 
+                  id="inq-msg" 
+                  rows={inquiryMode === 'visit' ? 2 : 3}
+                  placeholder={inquiryMode === 'visit' ? 'Any specific requirements for your site visit (min 10 characters)...' : `I am interested in ${property?.title || property?.name}. Please share more details.`}
+                  value={form.message}
+                  onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))} 
+                  minLength={10}
+                  required
+                />
+              </div>
+              <button type="submit" className="pd-submit" disabled={submitting}>
+                {submitting ? 'Submitting…' : (inquiryMode === 'visit' ? 'Confirm Visit Request' : 'Send Inquiry')}
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
+
 const PropertyDetail = () => {
   const { id } = useParams();
   const [searchParams] = useSearchParams();
@@ -191,18 +397,6 @@ const PropertyDetail = () => {
   const [submitting, setSubmitting] = useState(false);
   const [authModalState, setAuthModalState] = useState(null); // 'login' | 'register' | 'forgot' | null
   const [authModalEmail, setAuthModalEmail] = useState('');
-  const [form, setForm] = useState(() => {
-    const initialDate = getEarliestBookableDate();
-    const availableSlots = getAvailableSlots(initialDate);
-    return {
-      name: '',
-      phone: '',
-      email: '',
-      message: '',
-      visitDate: initialDate,
-      visitTime: availableSlots[0]?.value || 'Morning (10 AM - 1 PM)',
-    };
-  });
   const [visitBooked, setVisitBooked] = useState(false);
   const [activeVisitData, setActiveVisitData] = useState(null);
   // Per-property pending inquiry lock — true if user has an unanswered inquiry for this property within 7 days
@@ -455,62 +649,12 @@ const PropertyDetail = () => {
 
     setInquiryMode(mode);
     setInquiryError('');
-
-    if (mode === 'visit') {
-      const now = new Date();
-      const earliest = getEarliestBookableDate(now);
-      const available = getAvailableSlots(earliest, now);
-      const defaultSlot = available[0]?.value || 'Morning (10 AM - 1 PM)';
-      setForm(f => {
-        const currentDateValid = f.visitDate && f.visitDate >= earliest;
-        const targetDate = currentDateValid ? f.visitDate : earliest;
-        const availableForTarget = getAvailableSlots(targetDate, now);
-        const currentSlotValid = availableForTarget.some(s => s.value === f.visitTime);
-        return {
-          ...f,
-          visitDate: targetDate,
-          visitTime: currentSlotValid ? f.visitTime : (availableForTarget[0]?.value || defaultSlot),
-          message: f.message || `I would like to schedule a site visit for ${property?.title || property?.name || 'this property'}. Please confirm the available slots.`
-        };
-      });
-    } else {
-      if (!form.message) {
-        setForm(f => ({
-          ...f,
-          message: `I am interested in ${property?.title || property?.name || 'this property'}. Please share more details.`
-        }));
-      }
-    }
-
     setInquiryOpen(true);
   };
 
-  const handleDateChange = (e) => {
-    const selectedDate = e.target.value;
-    const now = new Date();
-    const minAllowed = getEarliestBookableDate(now);
-    const availableSlots = getAvailableSlots(selectedDate, now);
-
-    setForm(f => {
-      const isCurrentSlotValid = availableSlots.some(s => s.value === f.visitTime);
-      return {
-        ...f,
-        visitDate: selectedDate,
-        visitTime: isCurrentSlotValid ? f.visitTime : (availableSlots[0]?.value || ''),
-      };
-    });
-
-    if (selectedDate < minAllowed) {
-      setInquiryError(`Selected visit date (${selectedDate}) has passed. Earliest available date is ${minAllowed}.`);
-    } else if (availableSlots.length === 0) {
-      setInquiryError('All visit slots for the selected date are closed. Please select a future date.');
-    } else {
-      setInquiryError('');
-    }
-  };
-
-  const handleInquiry = async (e) => {
-    e.preventDefault();
+  const handleInquiry = async (formData, e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const form = formData || {};
     if (!user) {
       if (showToast) showToast('Please log in to submit inquiries or book visits.', 'info');
       setInquiryOpen(false);
@@ -1455,158 +1599,20 @@ const PropertyDetail = () => {
 
       {/* ── Inquiry / Site Visit Modal ── */}
       {inquiryOpen && (
-        <div className="pd-overlay" onClick={e => { if (e.target === e.currentTarget) setInquiryOpen(false); }}>
-          <div className="pd-modal">
-            <button className="pd-modal-close" onClick={() => setInquiryOpen(false)}>
-              <X size={18} />
-            </button>
-            {inquirySuccess ? (
-              <div className="pd-success">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                  <CheckCircle2 size={32} />
-                </div>
-                <h3>{inquiryMode === 'visit' ? 'Site Visit Booked!' : 'Inquiry Sent!'}</h3>
-                <p>
-                  {inquiryMode === 'visit'
-                    ? (isAgentAssigned
-                        ? `Your visit request has been sent to assigned agent ${agentName}. They will confirm your scheduled slot shortly.`
-                        : 'Your visit request has been recorded in the database. The builder representative will confirm your scheduled slot shortly.')
-                    : (isAgentAssigned
-                        ? `Your inquiry has been sent directly to assigned agent ${agentName}. Thank you for your interest!`
-                        : 'The property representative will contact you shortly. Thank you for your interest!')}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="pd-modal-head">
-                  <h3>{inquiryMode === 'visit' ? 'Book a Site Visit' : 'Send Free Inquiry'}</h3>
-                  <p>About: <strong>{property.title || property.name}</strong></p>
-                  {isAgentAssigned && (
-                    <p className="text-xs text-indigo-700 font-medium mt-1">
-                      Assigned Agent: <strong>{agentName}</strong> {agentAgency ? `(${agentAgency})` : ''}
-                    </p>
-                  )}
-                </div>
-                {inquiryError && (
-                  <div className="pd-error-banner">
-                    {inquiryError}
-                  </div>
-                )}
-                <form className="pd-form" onSubmit={handleInquiry}>
-                  <div className="pd-form-row">
-                    <div className="pd-field">
-                      <label htmlFor="inq-name">
-                        Your Name <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                      </label>
-                      <input 
-                        id="inq-name" 
-                        type="text" 
-                        placeholder="Full name" 
-                        value={form.name}
-                        onChange={e => setForm(f => ({ ...f, name: e.target.value }))} 
-                        minLength={3}
-                        required 
-                      />
-                    </div>
-                    <div className="pd-field">
-                      <label htmlFor="inq-phone">
-                        Phone Number <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                      </label>
-                      <input 
-                        id="inq-phone" 
-                        type="tel" 
-                        placeholder="+91 7600973093" 
-                        value={form.phone}
-                        onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} 
-                        required 
-                      />
-                    </div>
-                  </div>
-                  <div className="pd-field">
-                    <label htmlFor="inq-email">
-                      Email Address <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                    </label>
-                    <input 
-                      id="inq-email" 
-                      type="email" 
-                      placeholder="you@example.com" 
-                      value={form.email}
-                      onChange={e => setForm(f => ({ ...f, email: e.target.value }))} 
-                      required 
-                    />
-                  </div>
-
-                  {inquiryMode === 'visit' && (() => {
-                    const now = new Date();
-                    const earliestDate = getEarliestBookableDate(now);
-                    const maxDate = getMaxBookableDate(now, 60);
-
-                    return (
-                      <div className="pd-form-row">
-                        <div className="pd-field">
-                          <label htmlFor="inq-date">
-                            Preferred Visit Date <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                          </label>
-                          <input
-                            id="inq-date"
-                            type="date"
-                            min={earliestDate}
-                            max={maxDate}
-                            value={form.visitDate}
-                            onChange={handleDateChange}
-                            required
-                          />
-                        </div>
-
-                        <div className="pd-field">
-                          <label htmlFor="inq-time">
-                            Preferred Time Slot <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                          </label>
-                          <select
-                            id="inq-time"
-                            value={form.visitTime}
-                            onChange={e => {
-                              setForm(f => ({ ...f, visitTime: e.target.value }));
-                              setInquiryError('');
-                            }}
-                            required
-                          >
-                            {SITE_VISIT_TIME_SLOTS.map(slot => {
-                              const expired = isSlotExpired(slot, form.visitDate, now);
-                              return (
-                                <option key={slot.id} value={slot.value} disabled={expired}>
-                                  {slot.label}{expired ? ' (Closed)' : ''}
-                                </option>
-                              );
-                            })}
-                          </select>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  <div className="pd-field">
-                    <label htmlFor="inq-msg">
-                      Message <span className="text-red-500 font-bold" style={{ color: '#ef4444', marginLeft: '3px' }}>*</span>
-                    </label>
-                    <textarea 
-                      id="inq-msg" 
-                      rows={inquiryMode === 'visit' ? 2 : 3}
-                      placeholder={inquiryMode === 'visit' ? 'Any specific requirements for your site visit (min 10 characters)...' : `I am interested in ${property.title || property.name}. Please share more details.`}
-                      value={form.message}
-                      onChange={e => setForm(f => ({ ...f, message: e.target.value }))} 
-                      minLength={10}
-                      required
-                    />
-                  </div>
-                  <button type="submit" className="pd-submit" disabled={submitting}>
-                    {submitting ? 'Submitting…' : (inquiryMode === 'visit' ? 'Confirm Visit Request' : 'Send Inquiry')}
-                  </button>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
+        <InquiryModal
+          inquiryMode={inquiryMode}
+          inquirySuccess={inquirySuccess}
+          inquiryError={inquiryError}
+          setInquiryError={setInquiryError}
+          submitting={submitting}
+          property={property}
+          user={user}
+          isAgentAssigned={isAgentAssigned}
+          agentName={agentName}
+          agentAgency={agentAgency}
+          onClose={() => setInquiryOpen(false)}
+          onSubmit={handleInquiry}
+        />
       )}
 
       </div>

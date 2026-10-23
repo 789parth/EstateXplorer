@@ -61,11 +61,10 @@ const KycVerificationModal = ({
       const res = await uploadMultipleImages([file]);
       const rawUrl = res.urls?.[0] || (Array.isArray(res.data) ? res.data[0]?.url : res.data?.url);
       if (rawUrl) {
-        const resolvedUrl = getPublicImageUrl(rawUrl);
-        if (field === 'aadhar') setAadharUrl(resolvedUrl);
-        if (field === 'pan') setPanUrl(resolvedUrl);
-        if (field === 'company') setCompanyDocUrl(resolvedUrl);
-        if (field === 'agency') setAgencyDocUrl(resolvedUrl);
+        if (field === 'aadhar') setAadharUrl(rawUrl);
+        if (field === 'pan') setPanUrl(rawUrl);
+        if (field === 'company') setCompanyDocUrl(rawUrl);
+        if (field === 'agency') setAgencyDocUrl(rawUrl);
         if (showToast) showToast('Document uploaded successfully!', 'success');
       } else {
         throw new Error('Upload returned no URL');
@@ -246,7 +245,7 @@ const KycVerificationModal = ({
             {aadharUrl && (
               <div className="flex items-center gap-2 text-[0.72rem] text-blue-600 break-all pt-1">
                 <ExternalLink size={12} className="shrink-0" />
-                <a href={aadharUrl} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
+                <a href={getPublicImageUrl(aadharUrl)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
                   {aadharUrl}
                 </a>
               </div>
@@ -306,7 +305,7 @@ const KycVerificationModal = ({
             {panUrl && (
               <div className="flex items-center gap-2 text-[0.72rem] text-blue-600 break-all pt-1">
                 <ExternalLink size={12} className="shrink-0" />
-                <a href={panUrl} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
+                <a href={getPublicImageUrl(panUrl)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
                   {panUrl}
                 </a>
               </div>
@@ -367,7 +366,7 @@ const KycVerificationModal = ({
               {companyDocUrl && (
                 <div className="flex items-center gap-2 text-[0.72rem] text-blue-600 break-all pt-1">
                   <ExternalLink size={12} className="shrink-0" />
-                  <a href={companyDocUrl} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
+                  <a href={getPublicImageUrl(companyDocUrl)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
                     {companyDocUrl}
                   </a>
                 </div>
@@ -429,7 +428,7 @@ const KycVerificationModal = ({
               {agencyDocUrl && (
                 <div className="flex items-center gap-2 text-[0.72rem] text-blue-600 break-all pt-1">
                   <ExternalLink size={12} className="shrink-0" />
-                  <a href={agencyDocUrl} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
+                  <a href={getPublicImageUrl(agencyDocUrl)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
                     {agencyDocUrl}
                   </a>
                 </div>

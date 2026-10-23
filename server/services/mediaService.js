@@ -3,6 +3,30 @@ const path = require('path');
 const fs = require('fs');
 const { Readable } = require('stream');
 
+// High-speed in-memory LRU metadata cache for GridFS media streaming.
+// Prevents querying Atlas collections repeatedly during chunked Range requests for video/images.
+const mediaMetaCache = new Map();
+const MAX_MEDIA_META_CACHE = 500;
+const MEDIA_META_TTL = 3600 * 1000; // 1 hour TTL
+
+function getCachedMediaMeta(key) {
+  const item = mediaMetaCache.get(key);
+  if (!item) return null;
+  if (Date.now() > item.expiry) {
+    mediaMetaCache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+
+function setCachedMediaMeta(key, data) {
+  if (mediaMetaCache.size >= MAX_MEDIA_META_CACHE) {
+    const oldest = mediaMetaCache.keys().next().value;
+    mediaMetaCache.delete(oldest);
+  }
+  mediaMetaCache.set(key, { data, expiry: Date.now() + MEDIA_META_TTL });
+}
+
 /**
  * Returns the GridFS Bucket instance for the active MongoDB Atlas connection.
  */
@@ -66,20 +90,28 @@ const streamFileFromGridFS = async (req, res, idOrFilename) => {
     const cleanIdOrFilename = baseTarget || cleanNoQuery.replace(/^[\/\\]+/, '').replace(/^uploads\//, '').replace(/^api\/upload\/file\//, '');
     const isObjectId = mongoose.Types.ObjectId.isValid(cleanIdOrFilename) && cleanIdOrFilename.length === 24;
 
-    const query = isObjectId
-      ? { $or: [{ _id: new mongoose.Types.ObjectId(cleanIdOrFilename) }, { filename: cleanIdOrFilename }, { filename: baseTarget }] }
-      : { $or: [{ filename: cleanIdOrFilename }, { filename: baseTarget }, { 'metadata.originalName': baseTarget }] };
+    let file = getCachedMediaMeta(cleanIdOrFilename) || (baseTarget ? getCachedMediaMeta(baseTarget) : null);
 
-    const files = await bucket.find(query).limit(1).toArray();
+    if (!file) {
+      const query = isObjectId
+        ? { $or: [{ _id: new mongoose.Types.ObjectId(cleanIdOrFilename) }, { filename: cleanIdOrFilename }, { filename: baseTarget }] }
+        : { $or: [{ filename: cleanIdOrFilename }, { filename: baseTarget }, { 'metadata.originalName': baseTarget }] };
 
-    if (!files || files.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Requested media not found in MongoDB Atlas database',
-      });
+      const files = await bucket.find(query).limit(1).toArray();
+
+      if (!files || files.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Requested media not found in MongoDB Atlas database',
+        });
+      }
+
+      file = files[0];
+      setCachedMediaMeta(cleanIdOrFilename, file);
+      if (baseTarget && baseTarget !== cleanIdOrFilename) {
+        setCachedMediaMeta(baseTarget, file);
+      }
     }
-
-    const file = files[0];
     const fileSize = file.length;
     const contentType = file.contentType || (file.metadata && file.metadata.contentType) || 'application/octet-stream';
 

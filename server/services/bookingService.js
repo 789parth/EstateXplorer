@@ -48,7 +48,7 @@ async function bookUnit({
 
   const session = await mongoose.startSession();
   let booking;
-  let bookedUnit;
+  let bookedUnit, bookingNumber;
   let projectId;
   let builderId;
   let agentId;
@@ -153,7 +153,7 @@ async function bookUnit({
         throw err;
       }
 
-      const bookingNumber = generateBookingNumber();
+      bookingNumber = generateBookingNumber();
       [booking] = await Booking.create([{
         bookingNumber,
         project: projectId,

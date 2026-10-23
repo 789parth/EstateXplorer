@@ -198,6 +198,7 @@ exports.createProperty = async (req, res, next) => {
 
     // Invalidate properties cache immediately
     memoryCache.clear('properties');
+    if (property?._id) memoryCache.del(`property:${property._id}`);
 
     res.status(201).json({
       success: true,
@@ -273,19 +274,29 @@ exports.getProperties = async (req, res, next) => {
 // @access  Public (Gated when open_for_agent or in_inventory)
 exports.getProperty = async (req, res, next) => {
   try {
-    const property = await Property.findById(req.params.id)
-      .populate({
-        path: 'builder',
-        select: 'name companyName role reraNumber email phone',
-      })
-      .populate({
-        path: 'assignedAgent',
-        select: 'name email phone avatar agencyName reraNumber',
-      })
-      .lean();
+    const cacheKey = `property:${req.params.id}`;
+    let property = memoryCache.get(cacheKey);
 
-    if (!property || !property.isActive) {
-      return next(new AppError('Property not found', 404));
+    if (!property) {
+      property = await Property.findById(req.params.id)
+        .populate({
+          path: 'builder',
+          select: 'name companyName role reraNumber email phone',
+        })
+        .populate({
+          path: 'assignedAgent',
+          select: 'name email phone avatar agencyName reraNumber',
+        })
+        .lean();
+
+      if (!property || !property.isActive) {
+        return next(new AppError('Property not found', 404));
+      }
+
+      // Cache publicly accessible properties to eliminate duplicate database hits
+      if (!['open_for_agent', 'in_inventory'].includes(property.publishingStatus)) {
+        memoryCache.set(cacheKey, property, 60);
+      }
     }
 
     // Public Gating Rule (Spec §1, §11):
@@ -340,18 +351,15 @@ exports.getFeatured = async (req, res, next) => {
       publishingStatus: { $in: ['published_direct', 'published_with_agent'] },
     };
 
-    // Check cheaply if any featured listings exist before doing the full populate
-    const featuredCount = await Property.countDocuments({ ...baseFilter, isFeatured: true });
+    // Query featured listings directly in 1 database round trip
+    let properties = await Property.find({ ...baseFilter, isFeatured: true })
+      .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
+      .populate({ path: 'assignedAgent', select: 'name email phone avatar agencyName reraNumber' })
+      .limit(4)
+      .lean();
 
-    let properties;
-    if (featuredCount > 0) {
-      properties = await Property.find({ ...baseFilter, isFeatured: true })
-        .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
-        .populate({ path: 'assignedAgent', select: 'name email phone avatar agencyName reraNumber' })
-        .limit(4)
-        .lean();
-    } else {
-      // Fallback: latest active listings of this category
+    // Fallback: latest active listings of this category only if no featured items exist
+    if (!properties || properties.length === 0) {
       properties = await Property.find(baseFilter)
         .sort('-createdAt')
         .populate({ path: 'builder', select: 'name role companyName reraNumber agencyName' })
@@ -538,6 +546,26 @@ exports.updateProperty = async (req, res, next) => {
       }
     }
 
+    // Strip immutable / security-sensitive fields to prevent mass assignment
+    delete req.body._id;
+    delete req.body.createdAt;
+    delete req.body.updatedAt;
+    delete req.body.views;
+    delete req.body.enquiries;
+    delete req.body.visits;
+    delete req.body.sold;
+    delete req.body.availableUnitsCount;
+    delete req.body.totalUnitsCount;
+
+    if (req.user.role !== 'admin') {
+      if (property.builder) {
+        delete req.body.builder;
+      }
+      delete req.body.assignedAgent;
+      delete req.body.isFeatured;
+      delete req.body.agentAssignedAt;
+    }
+
     property = await Property.findByIdAndUpdate(propertyId, req.body, {
       new: true,
       runValidators: true,
@@ -545,6 +573,7 @@ exports.updateProperty = async (req, res, next) => {
 
     // Invalidate properties cache immediately
     memoryCache.clear('properties');
+    memoryCache.del(`property:${req.params.id}`);
 
     res.status(200).json({
       success: true,
@@ -586,6 +615,7 @@ exports.deleteProperty = async (req, res, next) => {
 
     // Invalidate properties cache immediately
     memoryCache.clear('properties');
+    memoryCache.del(`property:${req.params.id}`);
 
     res.status(200).json({
       success: true,
@@ -1336,10 +1366,12 @@ exports.deleteInquiry = async (req, res, next) => {
       : (inquiry.agent ? inquiry.agent.toString() : null);
 
     let isAuthorized =
+      req.user.role === 'admin' ||
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
       (inquiryAgentId && inquiryAgentId === currentUserId);
-    if (!isAuthorized && !inquiryBuilderId && !inquiryAgentId && inquiry.property) {
-      const linkedProperty = await Property.findById(inquiry.property).select('builder user').lean();
+    const targetPropId = inquiry.property || inquiry.project;
+    if (!isAuthorized && !inquiryBuilderId && !inquiryAgentId && targetPropId) {
+      const linkedProperty = await Property.findById(targetPropId).select('builder user').lean();
       const linkedOwnerId = linkedProperty?.builder || linkedProperty?.user;
       isAuthorized = !!linkedOwnerId && String(linkedOwnerId) === currentUserId;
     }
@@ -1389,8 +1421,9 @@ exports.replyToPropertyInquiry = async (req, res, next) => {
       (inquiryBuilderId && inquiryBuilderId === currentUserId) ||
       (inquiryAgentId && inquiryAgentId === currentUserId);
 
-    if (!isAuthorized && inquiry.property) {
-      const prop = await Property.findById(inquiry.property).select('builder user');
+    const targetPropId = inquiry.property || inquiry.project;
+    if (!isAuthorized && targetPropId) {
+      const prop = await Property.findById(targetPropId).select('builder user').lean();
       const linkedOwnerId = prop?.builder || prop?.user;
       if (linkedOwnerId && String(linkedOwnerId) === currentUserId) {
         isAuthorized = true;
@@ -1405,6 +1438,7 @@ exports.replyToPropertyInquiry = async (req, res, next) => {
     const senderRole = req.user.role === 'agent' ? 'Real Estate Agent' : req.user.role === 'owner' ? 'Property Owner' : 'Property Developer';
     const senderName =
       req.user.builderProfile?.companyName ||
+      req.user.agentProfile?.agencyName ||
       req.user.agencyProfile?.agencyName ||
       req.user.name ||
       senderRole;
@@ -1497,19 +1531,29 @@ exports.bulkDeleteInquiries = async (req, res, next) => {
 
     const currentUserId = (req.user.id || req.user._id)?.toString();
 
-    if (!['builder', 'owner', 'agent'].includes(req.user.role)) {
+    if (!['builder', 'owner', 'agent', 'admin'].includes(req.user.role)) {
       return next(new AppError('Your role cannot delete property inquiries.', 403));
     }
-    const properties = await Property.find({ builder: currentUserId }).select('_id').lean();
-    const propIds = properties.map((p) => p._id);
-    const filter = {
-      _id: { $in: ids },
-      $or: [
-        { builder: currentUserId },
-        { agent: currentUserId },
-        ...(propIds.length ? [{ property: { $in: propIds } }, { project: { $in: propIds } }] : []),
-      ],
-    };
+
+    let filter;
+    if (req.user.role === 'admin') {
+      filter = { _id: { $in: ids } };
+    } else {
+      const properties = await Property.find({
+        $or: [{ builder: currentUserId }, { user: currentUserId }],
+      })
+        .select('_id')
+        .lean();
+      const propIds = properties.map((p) => p._id);
+      filter = {
+        _id: { $in: ids },
+        $or: [
+          { builder: currentUserId },
+          { agent: currentUserId },
+          ...(propIds.length ? [{ property: { $in: propIds } }, { project: { $in: propIds } }] : []),
+        ],
+      };
+    }
 
     const ownedInquiries = await Inquiry.find(filter).select('_id').lean();
     if (ownedInquiries.length !== ids.length) {
@@ -1987,7 +2031,8 @@ exports.openPropertyForAgent = async (req, res, next) => {
     await property.save();
     memoryCache.clear('properties');
 
-    emitToUsers(null, SOCKET_EVENTS.PROPERTIES, {
+    const ownerUserId = property.builder ? String(property.builder) : String(req.user._id || req.user.id);
+    emitToUser(ownerUserId, SOCKET_EVENTS.PROPERTIES, {
       action: 'opened_for_agent',
       propertyId: property._id,
       title: property.title,
@@ -2037,7 +2082,8 @@ exports.publishPropertyDirect = async (req, res, next) => {
       { $set: { status: 'rejected', rejectionReason: 'Owner chose to publish the property directly without an agent', rejectedAt: new Date() } }
     ).catch(() => {});
 
-    emitToUsers(null, SOCKET_EVENTS.PROPERTIES, {
+    const ownerUserId = builderId || String(req.user._id || req.user.id);
+    emitToUser(ownerUserId, SOCKET_EVENTS.PROPERTIES, {
       action: 'published_direct',
       propertyId: property._id,
       title: property.title,

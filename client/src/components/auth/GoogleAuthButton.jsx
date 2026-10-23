@@ -59,11 +59,16 @@ const GoogleAuthButton = ({
   const [phoneError, setPhoneError] = useState('');
   const watchdogTimerRef = useRef(null);
   const focusListenerRef = useRef(null);
+  const focusTimerRef = useRef(null);
 
   const cleanupWatchers = () => {
     if (watchdogTimerRef.current) {
       clearTimeout(watchdogTimerRef.current);
       watchdogTimerRef.current = null;
+    }
+    if (focusTimerRef.current) {
+      clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
     }
     if (focusListenerRef.current) {
       window.removeEventListener('focus', focusListenerRef.current);
@@ -99,7 +104,10 @@ const GoogleAuthButton = ({
 
     // Window focus watcher: when user closes or switches back from popup, cancel loading
     const handleWindowFocus = () => {
-      setTimeout(() => {
+      if (focusTimerRef.current) {
+        clearTimeout(focusTimerRef.current);
+      }
+      focusTimerRef.current = setTimeout(() => {
         setLoading(false);
         cleanupWatchers();
       }, 1200);

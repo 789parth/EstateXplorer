@@ -84,7 +84,7 @@ const ContactSection = () => {
       setSubmitting(false);
       setSubmitted(true);
       showToast(res.message || 'Thank you! Your message has been sent to EstateXplorer support.', 'success');
-      broadcastRealtimeSync(SYNC_EVENTS.INQUIRY_CREATED, { action: 'new_contact_message', data: res.data });
+      broadcastRealtimeSync(SYNC_EVENTS.INQUIRIES, { action: 'new_contact_message', data: res.data });
       setFormData({
         name: '',
         email: '',

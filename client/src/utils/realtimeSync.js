@@ -118,8 +118,13 @@ export function useRealtimeSync(
 
     listeners.add(handler);
 
-    // Focus & visibility change revalidation
+    // Focus & visibility change revalidation with 1000ms cooldown to eliminate duplicate firing on tab switch
+    let lastRevalidateTime = 0;
     const handleFocusOrVisible = () => {
+      const now = Date.now();
+      if (now - lastRevalidateTime < 1000) return;
+      lastRevalidateTime = now;
+
       if (
         options.revalidateOnFocus !== false &&
         typeof document !== 'undefined' &&

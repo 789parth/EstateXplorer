@@ -119,7 +119,10 @@ const LeadAuditLog = require('./models/LeadAuditLog');
 // Using the mongoose 'connected' event avoids a second connectDB() call from app.js
 // (server.js already calls connectDB() during startup).
 const OTP = require('./models/OTP');
+let startupTasksExecuted = false;
 const runStartupTasks = () => {
+  if (startupTasksExecuted) return;
+  startupTasksExecuted = true;
   Property.syncIndexes().catch(() => {});
   Inquiry.syncIndexes().catch(() => {});
   User.syncIndexes().catch(() => {});

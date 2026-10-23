@@ -26,7 +26,7 @@ exports.cascadeDeleteAllUserData = async ({ userId, email }) => {
 
   // 1. Identify all property/project IDs owned by this user (if builder/owner)
   const userProperties = await Property.find({
-    $or: [{ builder: uid }]
+    $or: [{ builder: uid }, { user: uid }],
   }).select('_id').lean();
   const propertyIds = userProperties.map((p) => p._id);
 

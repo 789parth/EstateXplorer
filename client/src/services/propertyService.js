@@ -6,6 +6,21 @@ const clientCache = new Map();
 const CLIENT_CACHE_TTL = 120 * 1000; // 2 minutes fresh TTL
 const MAX_CACHE_SIZE = 50; // prevent unbounded growth across long sessions
 
+// In-flight request deduplication: prevents duplicate parallel network calls for identical queries
+const inFlightRequests = new Map();
+
+function fetchWithDeduplication(key, fetchFn) {
+  if (inFlightRequests.has(key)) {
+    return inFlightRequests.get(key);
+  }
+  const promise = fetchFn()
+    .finally(() => {
+      inFlightRequests.delete(key);
+    });
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
 function cacheSet(key, value) {
   if (clientCache.has(key)) {
     clientCache.delete(key); // refresh position
@@ -18,6 +33,7 @@ function cacheSet(key, value) {
 
 export const invalidateClientPropertyCache = () => {
   clientCache.clear();
+  inFlightRequests.clear();
 };
 if (typeof window !== 'undefined') {
   window.__invalidateClientPropertyCache = invalidateClientPropertyCache;
@@ -38,20 +54,24 @@ export const getProperties = async (params = {}, options = { useCache: true }) =
   if (options.useCache !== false && cached) {
     // If cache is older than TTL, revalidate silently in the background
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
-      api.get('/properties', { params }).then((res) => {
+      fetchWithDeduplication(cacheKey, async () => {
+        const res = await api.get('/properties', { params });
         if (res.data && res.data.success) {
           cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
+        return res.data;
       }).catch(() => {});
     }
     return cached.data;
   }
 
-  const response = await api.get('/properties', { params });
-  if (response.data && response.data.success) {
-    cacheSet(cacheKey, { data: response.data, timestamp: now });
-  }
-  return response.data;
+  return fetchWithDeduplication(cacheKey, async () => {
+    const response = await api.get('/properties', { params });
+    if (response.data && response.data.success) {
+      cacheSet(cacheKey, { data: response.data, timestamp: Date.now() });
+    }
+    return response.data;
+  });
 };
 
 export const getProperty = async (id, options = { useCache: true }) => {
@@ -62,20 +82,24 @@ export const getProperty = async (id, options = { useCache: true }) => {
   // Instant cache return (0ms speed)
   if (options.useCache !== false && cached) {
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
-      api.get(`/properties/${id}`).then((res) => {
+      fetchWithDeduplication(cacheKey, async () => {
+        const res = await api.get(`/properties/${id}`);
         if (res.data && res.data.success) {
           cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
+        return res.data;
       }).catch(() => {});
     }
     return cached.data;
   }
 
-  const response = await api.get(`/properties/${id}`);
-  if (response.data && response.data.success) {
-    cacheSet(cacheKey, { data: response.data, timestamp: now });
-  }
-  return response.data;
+  return fetchWithDeduplication(cacheKey, async () => {
+    const response = await api.get(`/properties/${id}`);
+    if (response.data && response.data.success) {
+      cacheSet(cacheKey, { data: response.data, timestamp: Date.now() });
+    }
+    return response.data;
+  });
 };
 
 export const recordPropertyAttribution = async (id, agentCode) => {
@@ -91,20 +115,24 @@ export const getFeaturedProperties = async (category = 'property', options = { u
   // Instant cache return (0ms speed)
   if (options.useCache !== false && cached) {
     if (now - cached.timestamp >= CLIENT_CACHE_TTL) {
-      api.get('/properties/featured', { params: { category } }).then((res) => {
+      fetchWithDeduplication(cacheKey, async () => {
+        const res = await api.get('/properties/featured', { params: { category } });
         if (res.data && res.data.success) {
           cacheSet(cacheKey, { data: res.data, timestamp: Date.now() });
         }
+        return res.data;
       }).catch(() => {});
     }
     return cached.data;
   }
 
-  const response = await api.get('/properties/featured', { params: { category } });
-  if (response.data && response.data.success) {
-    cacheSet(cacheKey, { data: response.data, timestamp: now });
-  }
-  return response.data;
+  return fetchWithDeduplication(cacheKey, async () => {
+    const response = await api.get('/properties/featured', { params: { category } });
+    if (response.data && response.data.success) {
+      cacheSet(cacheKey, { data: response.data, timestamp: Date.now() });
+    }
+    return response.data;
+  });
 };
 
 export const getMyProperties = async () => {

@@ -5,9 +5,11 @@ import Input from '../common/Input';
 import Button from '../common/Button';
 import { resetPasswordApi } from '../../services/authService';
 import { useAuth } from '../../hooks/useAuth';
+import { setAccessTokenInMemory } from '../../services/api';
+import { broadcastRealtimeSync, SYNC_EVENTS } from '../../utils/realtimeSync';
 
 const ResetForm = ({ email, onSuccess, onBackToLogin }) => {
-  const { showToast, setUser } = useAuth();
+  const { showToast, setUser, setAccessToken } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   const {
@@ -24,6 +26,13 @@ const ResetForm = ({ email, onSuccess, onBackToLogin }) => {
       const res = await resetPasswordApi(email, data.code, data.newPassword);
       if (res.success) {
         if (res.data?.user) setUser(res.data.user);
+        if (res.data?.accessToken) {
+          if (setAccessToken) setAccessToken(res.data.accessToken);
+          setAccessTokenInMemory(res.data.accessToken);
+        }
+        if (res.data?.user) {
+          broadcastRealtimeSync(SYNC_EVENTS.AUTH, { action: 'login', user: res.data.user });
+        }
         showToast('Password reset successfully!', 'success');
         if (onSuccess) onSuccess();
       }

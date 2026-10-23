@@ -42,7 +42,7 @@ const RequestSellingRightsModal = ({ isOpen, onClose, project, onSuccess, showTo
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">Request Authorized Selling Rights</h3>
-              <p className="text-xs text-slate-500">Apply to represent this {project.category === 'project' ? 'development project' : 'property'} &amp; unlock tracking URL</p>
+              <p className="text-xs text-slate-500">Apply to represent this {project.category === 'project' ? 'development project' : 'property'} as an authorized partner</p>
             </div>
           </div>
           <button

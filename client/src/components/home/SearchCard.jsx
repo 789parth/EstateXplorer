@@ -177,4 +177,4 @@ const SearchCard = ({ onSearch }) => {
   );
 };
 
-export default SearchCard;
+export default React.memo(SearchCard);

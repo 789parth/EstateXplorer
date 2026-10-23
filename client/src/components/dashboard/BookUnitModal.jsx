@@ -18,7 +18,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast, onViewInvo
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const projectId = lead?.property?._id || lead?.property;
+  const projectId = lead?.project?._id || lead?.project || lead?.property?._id || lead?.property;
 
   useEffect(() => {
     if (!isOpen || !projectId) {
@@ -42,7 +42,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast, onViewInvo
           setUnitTotalPages(res.totalPages || 1);
           if (res.data && res.data.length > 0) {
             setSelectedUnitId(res.data[0]._id);
-            setAgreementValue(String(res.data[0].price || lead?.property?.price || 5000000));
+            setAgreementValue(String(res.data[0].price || lead?.project?.price || lead?.property?.price || 5000000));
           }
         }
       } catch (err) {
@@ -157,7 +157,7 @@ const BookUnitModal = ({ isOpen, onClose, lead, onSuccess, showToast, onViewInvo
           </div>
           <div className="flex justify-between items-center">
             <span className="text-slate-500">Project:</span>
-            <span className="font-semibold text-blue-700">{lead.property?.title || lead.propertyTitle}</span>
+            <span className="font-semibold text-blue-700">{lead.project?.title || lead.property?.title || lead.propertyTitle}</span>
           </div>
           {lead.isAttributed && (
             <div className="flex justify-between items-center pt-1 border-t border-slate-200">

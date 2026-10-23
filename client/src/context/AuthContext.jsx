@@ -21,18 +21,45 @@ import { broadcastRealtimeSync, useRealtimeSync, SYNC_EVENTS } from '../utils/re
 
 export const AuthContext = createContext();
 
+// High-performance isolated toast event bus: allows Toast component to re-render
+// on toast notifications without triggering whole-application context re-render cascades.
+const toastListeners = new Set();
+let globalToastMessage = null;
+
+export const subscribeToast = (listener) => {
+  toastListeners.add(listener);
+  return () => toastListeners.delete(listener);
+};
+
+export const dispatchToast = (msg, type = 'success') => {
+  globalToastMessage = { msg, type, id: Date.now() };
+  toastListeners.forEach((listener) => {
+    try {
+      listener(globalToastMessage);
+    } catch {}
+  });
+};
+
+export const clearToast = () => {
+  globalToastMessage = null;
+  toastListeners.forEach((listener) => {
+    try {
+      listener(null);
+    } catch {}
+  });
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState(null);
 
   const showToast = useCallback((msg, type = 'success') => {
-    setToastMessage({ msg, type, id: Date.now() });
+    dispatchToast(msg, type);
   }, []);
 
   const hideToast = useCallback(() => {
-    setToastMessage(null);
+    clearToast();
   }, []);
 
   // Load/refresh user session from backend
@@ -438,13 +465,16 @@ export const AuthProvider = ({ children }) => {
       requestRole: handleRequestRole,
       getMyRoleRequests: handleGetMyRoleRequests,
       refreshUser,
-      toastMessage,
+      get toastMessage() {
+        return globalToastMessage;
+      },
       showToast,
       hideToast,
       setUser,
+      setAccessToken,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [user, accessToken, loading, toastMessage]
+    [user, accessToken, loading]
   );
 
   return (

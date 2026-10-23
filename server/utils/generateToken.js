@@ -48,6 +48,7 @@ const sendTokenResponse = (user, statusCode, res, message = 'Success') => {
     email: user.email,
     phone: user.phone || '',
     city: user.city || '',
+    state: user.state || '',
     about: user.about || '',
     role: user.role || 'buyer',
     roles: user.roles && user.roles.length > 0 ? user.roles : [user.role || 'buyer'],

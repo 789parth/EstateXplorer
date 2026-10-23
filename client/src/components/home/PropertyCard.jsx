@@ -220,11 +220,13 @@ const PropertyCard = ({ property, onBookVisit, isBooked = false }) => {
     </div>
 
     {/* Professional Share Modal */}
-    <ShareModal
-      isOpen={shareOpen}
-      onClose={() => setShareOpen(false)}
-      property={property}
-    />
+    {shareOpen && (
+      <ShareModal
+        isOpen={shareOpen}
+        onClose={() => setShareOpen(false)}
+        property={property}
+      />
+    )}
   </>
 );
 };

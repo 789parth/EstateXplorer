@@ -1,19 +1,25 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
+import { subscribeToast, clearToast } from '../../context/AuthContext';
 
 const Toast = () => {
-  const { toastMessage, hideToast } = useAuth();
+  const [toastMessage, setToastMessage] = useState(null);
+
+  useEffect(() => {
+    return subscribeToast((toast) => {
+      setToastMessage(toast);
+    });
+  }, []);
 
   useEffect(() => {
     if (toastMessage) {
       const timer = setTimeout(() => {
-        hideToast();
+        clearToast();
       }, 4000);
       return () => clearTimeout(timer);
     }
-  }, [toastMessage, hideToast]);
+  }, [toastMessage]);
 
   if (!toastMessage) return null;
 
@@ -36,7 +42,7 @@ const Toast = () => {
           {toastMessage.msg}
         </span>
         <button
-          onClick={hideToast}
+          onClick={clearToast}
           className="ml-2 text-white/60 hover:text-white transition-colors"
         >
           <X size={16} />

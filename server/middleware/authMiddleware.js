@@ -27,7 +27,7 @@ const protect = async (req, res, next) => {
 
     // Attach user to req
     const user = await User.findById(decoded.id)
-      .select('name email role roles isVerified isBlocked blockedReason')
+      .select('name email phone isPhoneVerified role roles isVerified isBlocked blockedReason')
       .lean();
     if (!user) {
       return next(new AppError('No user found with this id', 401));
@@ -50,6 +50,8 @@ const protect = async (req, res, next) => {
       _id: user._id,
       name: user.name,
       email: user.email,
+      phone: user.phone || '',
+      isPhoneVerified: Boolean(user.isPhoneVerified),
       role: activeRole,
       roles: approvedRoles,
       isVerified: user.isVerified,
@@ -97,7 +99,7 @@ const optionalAuth = async (req, res, next) => {
       process.env.JWT_ACCESS_SECRET
     );
     const user = await User.findById(decoded.id)
-      .select('name email role roles isVerified isBlocked blockedReason')
+      .select('name email phone isPhoneVerified role roles isVerified isBlocked blockedReason')
       .lean();
     if (user && !user.isBlocked) {
       const approvedRoles = user.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer'];
@@ -108,6 +110,8 @@ const optionalAuth = async (req, res, next) => {
         _id: user._id,
         name: user.name,
         email: user.email,
+      phone: user.phone || '',
+      isPhoneVerified: Boolean(user.isPhoneVerified),
         role: activeRole,
         roles: approvedRoles,
         isVerified: user.isVerified,

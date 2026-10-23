@@ -83,6 +83,10 @@ export function useSocket(token) {
 
   /** Register a listener for a socket event */
   const on = useCallback((event, handler) => {
+    // Detach previous handler if registered to prevent duplicate listener accumulation
+    if (sharedSocket && listenersRef.current[event]) {
+      sharedSocket.off(event, listenersRef.current[event]);
+    }
     listenersRef.current[event] = handler;
     if (sharedSocket) {
       sharedSocket.on(event, handler);
@@ -108,8 +112,10 @@ export const SOCKET_EVENTS = {
   PARTNERSHIP_REQUEST_CREATED: 'PARTNERSHIP_REQUEST_CREATED',
   PARTNERSHIP_STATUS_CHANGED: 'PARTNERSHIP_STATUS_CHANGED',
   NEW_ATTRIBUTED_LEAD: 'NEW_ATTRIBUTED_LEAD',
+  NEW_INQUIRY: 'NEW_INQUIRY',
   LEAD_STATUS_UPDATED: 'LEAD_STATUS_UPDATED',
   BOOKING_CREATED: 'BOOKING_CREATED',
   INVENTORY_STATUS_CHANGED: 'INVENTORY_STATUS_CHANGED',
   COMMISSION_CREATED: 'COMMISSION_CREATED',
+  PROPERTIES: 'PROPERTIES',
 };

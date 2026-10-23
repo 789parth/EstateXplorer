@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ProjectCard from './ProjectCard';
 import { Link } from 'react-router-dom';
 import { getFeaturedProperties } from '../../services/propertyService';
+import { calculateBuyerEffectivePrice, formatPrice } from '../../utils/formatters';
 
 const FeaturedProjects = ({ onExplore }) => {
   const [projects, setProjects] = useState([]);
@@ -15,19 +16,21 @@ const FeaturedProjects = ({ onExplore }) => {
         if (isMounted && res.success && Array.isArray(res.data) && res.data.length > 0) {
           const mapped = res.data.map(p => {
             const loc = typeof p.location === 'string' ? p.location : `${p.location?.address || ''}, ${p.location?.city || ''}`;
+            const { effectivePrice, isAgentAttributed } = calculateBuyerEffectivePrice(p);
+            const displayPrice = isAgentAttributed ? formatPrice(effectivePrice, undefined, p.purpose) : (p.priceDisplay || formatPrice(p.price, undefined, p.purpose));
             return {
               id: p._id,
               name: p.title || p.name,
               builder: p.builder?.builderProfile?.companyName || p.builder?.name || 'Top Builder',
               location: loc,
               bhk: p.type || 'Luxury Project',
-              priceRange: p.priceDisplay || `₹${p.price}`,
+              priceRange: displayPrice,
               status: p.status === 'uc' || p.status === 'upcoming' ? 'under_construction' : 'ready',
               statusLabel: p.statusLabel || (p.status === 'ready' ? 'Ready To Move' : 'Under Construction'),
               rera: p.rera,
               tags: [p.status === 'ready' ? 'Ready' : 'New Launch'],
-              features: p.usps && p.usps.length > 0 ? p.usps.slice(0, 3) : [p.type, loc, p.priceDisplay || `₹${p.price}`],
-              meta: `${loc} • ${p.priceDisplay || ''}`,
+              features: p.usps && p.usps.length > 0 ? p.usps.slice(0, 3) : [p.type, loc, displayPrice],
+              meta: `${loc} • ${displayPrice}`,
               image: p.images && p.images.length > 0 ? p.images[0] : 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=600&auto=format&fit=crop',
             };
           });

@@ -891,7 +891,7 @@ const AgentDashboard = () => {
               {activeTab === 'leads' && 'Property Inquiries'}
               {activeTab === 'visits' && 'Site Visit Appointments'}
               {activeTab === 'find-projects' && 'Find & Acquire Builder Projects'}
-              {activeTab === 'affiliations' && 'My Affiliations & Referral Links'}
+              {activeTab === 'affiliations' && 'My Authorized Affiliations'}
             </h1>
           </div>
           <div className="topbar-right flex items-center gap-2">
@@ -2200,7 +2200,7 @@ const AgentDashboard = () => {
                   <div className="flex items-center gap-2">
                     <Award size={18} className="text-emerald-600" />
                     <h3 className="section-title !mb-0">
-                      My Affiliations &amp; Referral Links ({filteredAffiliations.length})
+                      My Authorized Affiliations ({filteredAffiliations.length})
                     </h3>
                   </div>
                   <p className="text-xs text-slate-500 mt-1">

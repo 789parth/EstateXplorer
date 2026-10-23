@@ -130,9 +130,15 @@ function emitToUser(userId, event, payload) {
  * Emit a real-time event to multiple users simultaneously.
  */
 function emitToUsers(userIds, event, payload) {
-  if (!_io) return;
+  if (!_io || !userIds) return;
+  if (!Array.isArray(userIds)) {
+    emitToUser(userIds, event, payload);
+    return;
+  }
   for (const id of userIds) {
-    emitToUser(id, event, payload);
+    if (id) {
+      emitToUser(id, event, payload);
+    }
   }
 }
 
@@ -147,12 +153,16 @@ const SOCKET_EVENTS = {
 
   // Lead / Inquiry events
   NEW_ATTRIBUTED_LEAD: 'NEW_ATTRIBUTED_LEAD',
+  NEW_INQUIRY: 'NEW_INQUIRY',
   LEAD_STATUS_UPDATED: 'LEAD_STATUS_UPDATED',
 
   // Booking / Inventory events
   BOOKING_CREATED: 'BOOKING_CREATED',
   INVENTORY_STATUS_CHANGED: 'INVENTORY_STATUS_CHANGED',
   COMMISSION_CREATED: 'COMMISSION_CREATED',
+
+  // Property events
+  PROPERTIES: 'PROPERTIES',
 };
 
 module.exports = {
