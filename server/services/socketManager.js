@@ -31,9 +31,21 @@ function initSocket(httpServer) {
 
   _io = new Server(httpServer, {
     cors: {
-      origin: [process.env.CLIENT_URL, ...(process.env.CORS_ALLOWED_ORIGINS || '').split(',')]
-        .map((value) => value?.trim())
-        .filter(Boolean),
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const allowedOrigins = [process.env.CLIENT_URL, ...(process.env.CORS_ALLOWED_ORIGINS || '').split(',')]
+          .map((value) => value?.trim().replace(/\/+$/, ''))
+          .filter(Boolean);
+        allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
+
+        const cleanOrigin = origin.trim().replace(/\/+$/, '');
+        const isAllowed = allowedOrigins.includes(cleanOrigin) ||
+          cleanOrigin.endsWith('.vercel.app') ||
+          cleanOrigin.endsWith('.onrender.com');
+
+        return callback(null, isAllowed);
+      },
+      credentials: true,
       methods: ['GET', 'POST'],
     },
     // Use long-polling first for compatibility, then upgrade to WebSocket

@@ -33,12 +33,12 @@
   ],
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/index.js"
+      "source": "/api/:match*",
+      "destination": "https://estatexplorer.onrender.com/api/:match*"
     },
     {
-      "source": "/uploads/(.*)",
-      "destination": "/api/index.js"
+      "source": "/uploads/:match*",
+      "destination": "https://estatexplorer.onrender.com/uploads/:match*"
     },
     {
       "source": "/(.*)",

@@ -65,10 +65,16 @@ app.use(
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       const allowedOrigins = [process.env.CLIENT_URL, ...(process.env.CORS_ALLOWED_ORIGINS || '').split(',')]
-        .map((value) => value?.trim())
+        .map((value) => value?.trim().replace(/\/+$/, ''))
         .filter(Boolean);
-      if (process.env.NODE_ENV !== 'production') allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
-      return callback(null, allowedOrigins.includes(origin));
+      allowedOrigins.push('http://localhost:5173', 'http://localhost:3000');
+
+      const cleanOrigin = origin.trim().replace(/\/+$/, '');
+      const isAllowed = allowedOrigins.includes(cleanOrigin) ||
+        cleanOrigin.endsWith('.vercel.app') ||
+        cleanOrigin.endsWith('.onrender.com');
+
+      return callback(null, isAllowed);
     },
     credentials: true,
   })
