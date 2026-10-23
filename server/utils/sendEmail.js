@@ -9,13 +9,16 @@ let cachedTransporter = null;
  */
 const sendViaBrevo = async (options) => {
   const brevoApiKey = (process.env.BREVO_API_KEY || '').trim();
-  const rawSender = (process.env.EMAIL_FROM || process.env.SMTP_USER || '').trim();
+  const rawSender = (process.env.EMAIL_FROM || process.env.SMTP_USER || 'parthadthakkar@gmail.com').trim();
 
   let senderName = 'EstateXplorer';
   let senderEmail = rawSender;
   if (rawSender.includes('<') && rawSender.includes('>')) {
     senderName = rawSender.split('<')[0].replace(/"/g, '').trim() || 'EstateXplorer';
     senderEmail = rawSender.split('<')[1].replace('>', '').trim();
+  }
+  if (!senderEmail || !senderEmail.includes('@')) {
+    senderEmail = 'parthadthakkar@gmail.com';
   }
 
   const payload = JSON.stringify({
