@@ -59,6 +59,7 @@ app.get('/api/health', (req, res) => {
       hasUser: Boolean(process.env.SMTP_USER),
       userDomain: (process.env.SMTP_USER || '').split('@')[1] || 'none',
       hasPass: Boolean(process.env.SMTP_PASS),
+      hasBrevo: Boolean(process.env.BREVO_API_KEY),
       passLength: (process.env.SMTP_PASS || '').length,
       host: process.env.SMTP_HOST || 'not_set',
       port: process.env.SMTP_PORT || 'not_set',
