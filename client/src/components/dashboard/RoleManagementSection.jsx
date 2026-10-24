@@ -98,9 +98,9 @@ const RoleManagementSection = () => {
     .filter((r) => r.status === 'PENDING')
     .map((r) => r.requestedRole);
 
-  const rawRoles = user?.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer'];
-  const approvedRoles = rawRoles.filter((r) => (!pendingRoles.includes(r) || r === 'buyer') && (isActualAdmin || r !== 'admin'));
-  const activeRole = approvedRoles.includes(user?.role) ? user?.role : 'buyer';
+  const rawRoles = user?.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer', 'builder', 'agent', 'owner'];
+  const approvedRoles = isActualAdmin ? ['buyer', 'builder', 'agent', 'owner', 'admin'] : ['buyer', 'builder', 'agent', 'owner'];
+  const activeRole = user?.role || 'buyer';
 
   const handleSwitch = async (targetRole) => {
     if (targetRole === activeRole) return;

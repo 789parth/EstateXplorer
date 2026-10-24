@@ -42,8 +42,10 @@ const protect = async (req, res, next) => {
       );
     }
 
-    const approvedRoles = user.roles && Array.isArray(user.roles) && user.roles.length > 0 ? user.roles : ['buyer'];
-    const activeRole = approvedRoles.includes(user.role) ? user.role : 'buyer';
+    const userRoles = user.roles && Array.isArray(user.roles) && user.roles.length > 0
+      ? user.roles
+      : ['buyer', 'builder', 'agent', 'owner'];
+    const activeRole = user.role || 'buyer';
 
     req.user = {
       id: user._id,
@@ -53,7 +55,7 @@ const protect = async (req, res, next) => {
       phone: user.phone || '',
       isPhoneVerified: Boolean(user.isPhoneVerified),
       role: activeRole,
-      roles: approvedRoles,
+      roles: userRoles,
       isVerified: user.isVerified,
       isBlocked: user.isBlocked,
     };

@@ -112,7 +112,7 @@ exports.register = async (req, res, next) => {
       return next(new AppError('Mobile number is already registered. Please log in or use a different mobile number.', 400));
     }
 
-    const userRoles = [activeRole];
+    const userRoles = Array.from(new Set([activeRole, 'buyer', 'owner', 'builder', 'agent']));
 
     const user = await User.create({
       name: normalizeTitleCase(name),
@@ -350,7 +350,7 @@ exports.verifyRegistrationOTP = async (req, res, next) => {
       );
     }
 
-    const userRoles = [activeRole];
+    const userRoles = Array.from(new Set([activeRole, 'buyer', 'owner', 'builder', 'agent']));
 
     // Create user with isVerified: true and standard portal roles
     const user = await User.create({
@@ -1264,7 +1264,7 @@ exports.googleAuth = async (req, res, next) => {
       const activeRole = chosenRole && ['buyer', 'owner', 'builder', 'agent'].includes(chosenRole)
         ? chosenRole
         : 'buyer';
-      const userRoles = [activeRole];
+      const userRoles = Array.from(new Set([activeRole, 'buyer', 'owner', 'builder', 'agent']));
 
       user = await User.create({
         name,
@@ -1346,19 +1346,29 @@ exports.requestRole = async (req, res, next) => {
       return next(new AppError(`You already have a pending request for the '${requestedRole}' role. Please wait for admin review.`, 400));
     }
 
-    // Create new role request
+    // Immediate direct access: all roles are granted without pending admin approval
+    if (!user.roles || !Array.isArray(user.roles)) {
+      user.roles = ['buyer', 'builder', 'agent', 'owner'];
+    }
+    if (!user.roles.includes(requestedRole)) {
+      user.roles.push(requestedRole);
+    }
+    user.role = requestedRole;
+    await user.save();
+
     const roleRequest = await RoleRequest.create({
       userId: user._id,
       email: user.email,
-      currentRole: user.role || 'buyer',
+      currentRole: requestedRole,
       requestedRole,
-      status: 'PENDING',
+      status: 'APPROVED',
+      reviewedAt: new Date(),
       requestedAt: new Date(),
     });
 
-    res.status(201).json({
+    res.status(200).json({
       success: true,
-      message: `Request for '${requestedRole}' role submitted successfully. It is now pending admin approval.`,
+      message: `Access granted for '${requestedRole}' role! Switched successfully.`,
       data: roleRequest,
     });
   } catch (error) {
@@ -1399,11 +1409,12 @@ exports.switchRole = async (req, res, next) => {
       return next(new AppError('User not found', 404));
     }
 
-    const approvedRoles = user.roles && user.roles.length > 0 ? user.roles : [user.role || 'buyer'];
-
-    // Buyer role is always accessible to all users
-    if (role !== 'buyer' && !approvedRoles.includes(role)) {
-      return next(new AppError(`You do not have approved access for the '${role}' role. Please request access from your profile and wait for administrator approval.`, 403));
+    // All standard roles (buyer, builder, agent, owner) are freely accessible to all users
+    if (!user.roles || !Array.isArray(user.roles)) {
+      user.roles = ['buyer', 'builder', 'agent', 'owner'];
+    }
+    if (!user.roles.includes(role) && role !== 'admin') {
+      user.roles.push(role);
     }
 
     user.role = role;
