@@ -441,9 +441,13 @@ exports.login = async (req, res, next) => {
       );
     }
 
-    // Ensure roles array is initialized
-    if (!user.roles || user.roles.length === 0) {
-      user.roles = [user.role || 'buyer'];
+    // Ensure user has access to all standard portal roles (buyer, builder, agent, owner)
+    if (!user.roles || !Array.isArray(user.roles) || user.roles.length === 0) {
+      user.roles = ['buyer', 'builder', 'agent', 'owner'];
+    } else {
+      ['buyer', 'builder', 'agent', 'owner'].forEach((r) => {
+        if (!user.roles.includes(r)) user.roles.push(r);
+      });
     }
 
     // STRICT ADMIN SEGREGATION:
@@ -1197,19 +1201,17 @@ exports.googleAuth = async (req, res, next) => {
         });
       }
 
-      // Standard role handling for Google Sign-in:
+      // Standard role handling for Google Sign-in: all non-admin roles freely accessible
+      if (!user.roles || !Array.isArray(user.roles)) {
+        user.roles = ['buyer', 'builder', 'agent', 'owner'];
+      }
       if (chosenRole && ['buyer', 'builder', 'agent', 'owner'].includes(chosenRole)) {
-        if (!user.roles || !Array.isArray(user.roles) || user.roles.length === 0) {
-          user.roles = [chosenRole];
+        if (!user.roles.includes(chosenRole)) {
+          user.roles.push(chosenRole);
         }
-        if (user.roles.includes(chosenRole)) {
-          user.role = chosenRole;
-        }
+        user.role = chosenRole;
       } else if (!user.role) {
         user.role = 'buyer';
-        if (!user.roles || user.roles.length === 0) {
-          user.roles = ['buyer'];
-        }
       }
       await user.save();
     } else {
