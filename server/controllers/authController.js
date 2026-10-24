@@ -422,6 +422,9 @@ exports.login = async (req, res, next) => {
     }
 
     // Check password
+    if (!user.password) {
+      return next(new AppError('This account was created using Google sign-in. Please sign in with Google or use forgot password to set a password.', 400));
+    }
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
       return next(new AppError('Invalid credentials', 401));
