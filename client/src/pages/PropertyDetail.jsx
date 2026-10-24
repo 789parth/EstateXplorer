@@ -479,7 +479,6 @@ const PropertyDetail = () => {
 
   useEffect(() => {
     if (user) {
-      setForm(f => ({ ...f, name: user.name || '', email: user.email || '', phone: user.phone || f.phone || '' }));
       getUserWishlist()
         .then(res => {
           if (res.success && Array.isArray(res.data)) {
